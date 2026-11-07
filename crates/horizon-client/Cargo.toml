@@ -11,6 +11,8 @@ autoexamples = false
 autotests = false
 
 [dependencies]
+# The win7 targets' link-search (crates/horizon-win7-libs), for this binary's links.
+horizon-win7-libs = { path = "../horizon-win7-libs" }
 horizon-cosmetics = { path = "../horizon-cosmetics" }
 horizon-client-lib = { path = "../horizon-client-lib", default-features = false }
 horizon-assets = { path = "../horizon-assets" }

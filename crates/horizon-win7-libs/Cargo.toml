@@ -1,0 +1,11 @@
+[package]
+name = "horizon-win7-libs"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "The link-search the win7 targets need for the old windows-targets' import libraries, wherever a Windows 7 build is linked"
+
+# Nothing but a build script (build.rs): every binary that links for the win7 targets
+# depends on this, so its one `cargo:rustc-link-search` reaches each final link.
+
+[dependencies]

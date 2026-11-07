@@ -41,6 +41,8 @@ clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 horizon-theme = { path = "../crates/horizon-theme" }
 horizon-core = { path = "../crates/horizon-core" }
+# The win7 target's link-search (crates/horizon-win7-libs), for the launcher's link.
+horizon-win7-libs = { path = "../crates/horizon-win7-libs" }
 horizon-cosmetics = { path = "../crates/horizon-cosmetics" }
 # `horizon-launcher mcp`: the Model Context Protocol, shared with horizon-ctl and horizon-server.
 horizon-mcp = { path = "../crates/horizon-mcp" }

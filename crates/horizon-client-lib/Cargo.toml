@@ -13,6 +13,8 @@ description = "Reusable client systems, control tool and parity probes"
 path = "../horizon-client/src/client_lib.rs"
 
 [dependencies]
+# The win7 targets' link-search (crates/horizon-win7-libs), for this binary's links.
+horizon-win7-libs = { path = "../horizon-win7-libs" }
 horizon-assets = { path = "../horizon-assets" }
 horizon-client-core = { path = "../horizon-client-core" }
 horizon-client-input = { path = "../horizon-client-input" }

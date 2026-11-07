@@ -2711,6 +2711,7 @@ dependencies = [
  "horizon-release-sign",
  "horizon-telemetry",
  "horizon-theme",
+ "horizon-win7-libs",
  "horizon-world",
  "image",
  "keyring",
@@ -2793,6 +2794,7 @@ name = "horizon-prepare"
 version = "0.1.0"
 dependencies = [
  "crc32fast",
+ "horizon-win7-libs",
  "libc",
  "regex",
  "sha1",
@@ -2851,6 +2853,10 @@ dependencies = [
 
 [[package]]
 name = "horizon-theme"
+version = "0.1.0"
+
+[[package]]
+name = "horizon-win7-libs"
 version = "0.1.0"
 
 [[package]]
