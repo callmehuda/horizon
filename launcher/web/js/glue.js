@@ -85,14 +85,33 @@ export async function fetchBytes(url, onProgress) {
     return new Uint8Array(await response.arrayBuffer());
   }
   const reader = response.body.getReader();
-  const parts = [];
+  // Large assets can briefly occupy twice their size if every network chunk is
+  // retained and then copied into a final buffer. Preallocate once when the server
+  // provides a usable length; keep the chunked fallback otherwise.
+  const canPreallocate = Number.isSafeInteger(total) && total > 0 && total <= 256 * 1024 * 1024;
+  let output = canPreallocate ? new Uint8Array(total) : null;
+  const parts = output ? null : [];
   let loaded = 0;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    parts.push(value);
+    if (output) {
+      if (loaded + value.length > output.length) {
+        // Content-Length can describe the compressed transfer while fetch exposes
+        // decompressed bytes. Grow only if the stream proves the estimate too small.
+        const grown = new Uint8Array(Math.max(loaded + value.length, output.length * 2));
+        grown.set(output.subarray(0, loaded));
+        output = grown;
+      }
+      output.set(value, loaded);
+    } else {
+      parts.push(value);
+    }
     loaded += value.length;
     onProgress(loaded, total);
+  }
+  if (output) {
+    return output.subarray(0, loaded);
   }
   const bytes = new Uint8Array(loaded);
   let at = 0;
