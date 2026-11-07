@@ -231,7 +231,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ matrix.toolchain || 'stable' }}
-          targets: ${{ matrix.toolchain == 'nightly' && '' || matrix.target }}
+          # (An empty string is falsy in GitHub expressions: the target only when it is
+          # not the nightly — the win7 build needs no rustup target, it builds its own std.)
+          targets: ${{ matrix.toolchain != 'nightly' && matrix.target || '' }}
           components: ${{ matrix.toolchain == 'nightly' && 'rust-src' || '' }}
       - uses: Swatinem/rust-cache@v2
         with:
@@ -380,7 +382,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ matrix.toolchain || 'stable' }}
-          targets: ${{ matrix.toolchain == 'nightly' && '' || matrix.target }}
+          # (An empty string is falsy in GitHub expressions: the target only when it is
+          # not the nightly — the win7 build needs no rustup target, it builds its own std.)
+          targets: ${{ matrix.toolchain != 'nightly' && matrix.target || '' }}
           components: ${{ matrix.toolchain == 'nightly' && 'rust-src' || '' }}
       - uses: Swatinem/rust-cache@v2
         with:
@@ -522,8 +526,24 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - name: Is Pages on?
+        # enablement needs a token a workflow has not (a PAT's own Pages permission), so the
+        # switch is the player's one click; until then this job waits, and the zip on every
+        # launcher release carries the same three files.
+        id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/${{ github.repository }}/pages" > /dev/null 2>&1; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::GitHub Pages is not enabled for this repository yet: Settings -> Pages -> Source "GitHub Actions". Until then this job skips publishing; every launcher release carries the same site as horizon-launcher-web.zip."
+          fi
       - uses: actions/configure-pages@v5
+        if: steps.pages.outputs.enabled == 'true'
       - uses: actions/deploy-pages@v4
+        if: steps.pages.outputs.enabled == 'true'
         id: deployment
 
   sign:

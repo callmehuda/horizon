@@ -171,7 +171,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ matrix.toolchain || 'stable' }}
-          targets: ${{ matrix.toolchain == 'nightly' && '' || matrix.target }}
+          # (An empty string is falsy in GitHub expressions: the target only when it is
+          # not the nightly — the win7 build needs no rustup target, it builds its own std.)
+          targets: ${{ matrix.toolchain != 'nightly' && matrix.target || '' }}
           components: ${{ matrix.toolchain == 'nightly' && 'rust-src' || '' }}
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted' && !matrix.musl
