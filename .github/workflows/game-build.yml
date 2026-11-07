@@ -168,8 +168,9 @@ jobs:
           # may end up in a release. target/ is rebuilt from scratch; .local/ is relinked by vanilla-data.sh, which
           # keeps its preparations outside the checkout.
           clean: true
-      - uses: dtolnay/rust-toolchain@${{ matrix.toolchain || 'stable' }}
+      - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: ${{ matrix.toolchain || 'stable' }}
           targets: ${{ matrix.toolchain == 'nightly' && '' || matrix.target }}
           components: ${{ matrix.toolchain == 'nightly' && 'rust-src' || '' }}
       - uses: Swatinem/rust-cache@v2

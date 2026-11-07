@@ -228,8 +228,9 @@ jobs:
           persist-credentials: false
       # The win7 build's nightly carries rust-src and compiles std for its target; the
       # tier-3 target has no prebuilt std for `rustup target add` to fetch.
-      - uses: dtolnay/rust-toolchain@${{ matrix.toolchain || 'stable' }}
+      - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: ${{ matrix.toolchain || 'stable' }}
           targets: ${{ matrix.toolchain == 'nightly' && '' || matrix.target }}
           components: ${{ matrix.toolchain == 'nightly' && 'rust-src' || '' }}
       - uses: Swatinem/rust-cache@v2
@@ -376,8 +377,9 @@ jobs:
         with:
           ref: ${{ needs.decide.outputs.head }}
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@${{ matrix.toolchain || 'stable' }}
+      - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: ${{ matrix.toolchain || 'stable' }}
           targets: ${{ matrix.toolchain == 'nightly' && '' || matrix.target }}
           components: ${{ matrix.toolchain == 'nightly' && 'rust-src' || '' }}
       - uses: Swatinem/rust-cache@v2

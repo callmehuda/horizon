@@ -190,8 +190,9 @@ jobs:
           # Always from a clean checkout, the Mac mini's runner too: its work folder is shared with pull requests'
           # parity jobs, and nothing they leave may end up in a launcher release (target/ is rebuilt from scratch).
           clean: true
-      - uses: dtolnay/rust-toolchain@${{ matrix.toolchain || 'stable' }}
+      - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: ${{ matrix.toolchain || 'stable' }}
           targets: ${{ matrix.toolchain == 'nightly' && '' || matrix.target }}
           components: ${{ matrix.toolchain == 'nightly' && 'rust-src' || '' }}
       - uses: Swatinem/rust-cache@v2
