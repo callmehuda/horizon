@@ -35,3 +35,6 @@
 
 # Release-only compiled original exporter bundle.
 /exporters/
+# The web launcher's build output (the site the workflow assembles).
+/launcher/web/site/
+/launcher/web/out/

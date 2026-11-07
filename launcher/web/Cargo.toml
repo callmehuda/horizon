@@ -1,0 +1,46 @@
+[package]
+name = "horizon-web"
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+description = "Horizon's launcher in the browser: the fork's releases, and the pinned Minecraft's files, downloaded from Mojang and checked as the desktop launcher checks them"
+
+# The launcher's own workspace: this crate builds by itself (the desktop launcher's GPUI does
+# not compile to wasm; this is the browser edition, sharing its theme and its pins).
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The design tokens and fonts the desktop launcher uses, shared here (pure data: no platform).
+horizon-theme = { path = "../../crates/horizon-theme" }
+# glow (OpenGL), not wgpu: a smaller wasm on the oldest machines' WebGL2. `links` lets egui
+# open the release and site links; the windowing the native development run needs is a
+# target dependency below.
+eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "links"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The pinned files' sha1s, checked as the desktop launcher checks them (mojang.rs).
+sha1 = "0.10"
+
+# The native development run's windowing (winit builds for wasm without them).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+eframe = { version = "0.37", default-features = false, features = ["wayland", "x11"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+
+[build-dependencies]
+serde_json = "1"
+
+[profile.release]
+# A web build downloads over whatever connection the player has: smaller is faster everywhere.
+# No `strip`: wasm-bindgen reads the target-features section the build leaves; wasm-opt (the
+# workflow's step after it) does the stripping.
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"

@@ -10,10 +10,15 @@ name: build
 #              own download checks them), then a full horizon-prepare and the exporters' bundle
 #              the game folders ship.
 #   game       horizon-client, horizon-ctl, horizon-prepare and horizon-server on Windows x64,
-#              32-bit Windows (i686-pc-windows-msvc), Linux x86-64 (+ the server folder) and
-#              macOS (Apple Silicon, and Intel cross-built), packaged by xtask.
-#   launcher   horizon-launcher on the same five platforms, built with HORIZON_GAME_REPO so it
-#              installs this fork's game builds and updates itself from this fork's releases.
+#              32-bit Windows (i686-win7-windows-msvc: Windows 7 SP1 and newer, std built for
+#              the win7 baseline with nightly -Zbuild-std), Linux x86-64 (+ the server folder)
+#              and macOS (Apple Silicon, and Intel cross-built), packaged by xtask.
+#   launcher   horizon-launcher on the same five platforms (the 32-bit one a Windows 7 build
+#              too), built with HORIZON_GAME_REPO so it installs this fork's game builds and
+#              updates itself from this fork's releases.
+#   web        horizon-web, the launcher's browser edition (launcher/web), on GitHub Pages:
+#              the fork's releases, and the pinned Minecraft's files from Mojang, in the
+#              browser. horizon-launcher-web.zip goes on the launcher release with the rest.
 #   sign       SHA256SUMS signed with the RELEASE_SIGNING_KEY secret (an Ed25519 key whose
 #              public half is in crates/horizon-release-sign/release-keys.txt); without the
 #              secret a throwaway key signs, and the releases are marked pre-release.
@@ -27,6 +32,7 @@ name: build
 #
 # Windows x86's and the macOS builds may fail without holding the release (continue-on-error):
 # the release steps publish what built and warn about the rest, as upstream does for ARM64.
+# The same for the web build (pages: it simply stays at the last good one).
 on:
   push:
     branches: [main, master, 'build-*']
@@ -185,7 +191,11 @@ jobs:
             rustflags: -C target-feature=+crt-static
           - name: windows-x86
             os: windows-latest
-            target: i686-pc-windows-msvc
+            # Windows 7's baseline: Rust 1.78 raised *-pc-windows-* to Windows 10, so the
+            # 32-bit build targets the win7 one (tier 3), building its own std on nightly.
+            # It runs on Windows 7 SP1 and everything newer.
+            target: i686-win7-windows-msvc
+            toolchain: nightly
             dir: horizon-windows-x86
             asset: horizon-windows-x86.zip
             exe: .exe
@@ -216,9 +226,12 @@ jobs:
         with:
           ref: ${{ needs.decide.outputs.head }}
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      # The win7 build's nightly carries rust-src and compiles std for its target; the
+      # tier-3 target has no prebuilt std for `rustup target add` to fetch.
+      - uses: dtolnay/rust-toolchain@${{ matrix.toolchain || 'stable' }}
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.toolchain == 'nightly' && '' || matrix.target }}
+          components: ${{ matrix.toolchain == 'nightly' && 'rust-src' || '' }}
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: fork-game-${{ matrix.name }}
@@ -226,7 +239,8 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
       - name: Build the client, horizon-ctl, horizon-prepare and horizon-server
-        run: cargo build --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }} -p horizon-client -p horizon-client-lib --bin horizon-client --bin horizon-ctl -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server
+        # -Z build-std compiles std for the win7 target (nightly only).
+        run: cargo build --release --locked ${{ matrix.toolchain == 'nightly' && '-Z build-std' || '' }} ${{ matrix.target && format('--target {0}', matrix.target) || '' }} -p horizon-client -p horizon-client-lib --bin horizon-client --bin horizon-ctl -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server
       - name: Every program the release folder takes was built
         run: |
           for binary in horizon-client horizon-ctl horizon-prepare horizon-server; do
@@ -235,6 +249,10 @@ jobs:
       - name: Verify Windows executable architecture
         if: runner.os == 'Windows'
         run: python tools/check_pe_arch.py "${{ matrix.pe_arch }}" "$BIN/horizon-client${{ matrix.exe }}" "$BIN/horizon-ctl${{ matrix.exe }}" "$BIN/horizon-prepare${{ matrix.exe }}" "$BIN/horizon-server${{ matrix.exe }}"
+      - name: Every import loads on Windows 7
+        # The win7 build's own guard: no API sets, nothing Windows 8 or newer ships.
+        if: matrix.name == 'windows-x86'
+        run: python tools/check_win7_imports.py "$BIN/horizon-client${{ matrix.exe }}" "$BIN/horizon-ctl${{ matrix.exe }}" "$BIN/horizon-prepare${{ matrix.exe }}" "$BIN/horizon-server${{ matrix.exe }}"
       - name: Every program starts
         run: |
           set -euo pipefail
@@ -321,7 +339,9 @@ jobs:
             rustflags: -C target-feature=+crt-static
           - name: windows-x86
             os: windows-latest
-            target: i686-pc-windows-msvc
+            # Windows 7's baseline, as the game's windows-x86 (nightly, -Z build-std).
+            target: i686-win7-windows-msvc
+            toolchain: nightly
             asset: horizon-launcher-windows-x86.zip
             binary: horizon-launcher.exe
             pe_arch: x86
@@ -356,9 +376,10 @@ jobs:
         with:
           ref: ${{ needs.decide.outputs.head }}
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@${{ matrix.toolchain || 'stable' }}
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.toolchain == 'nightly' && '' || matrix.target }}
+          components: ${{ matrix.toolchain == 'nightly' && 'rust-src' || '' }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: launcher
@@ -377,10 +398,13 @@ jobs:
           HORIZON_GAME_REPO: ''
         run: cargo test --release --locked
       - name: Build the launcher
-        run: cargo build --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+        run: cargo build --release --locked ${{ matrix.toolchain == 'nightly' && '-Z build-std' || '' }} ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
       - name: Verify Windows executable architecture
         if: runner.os == 'Windows'
         run: python ../tools/check_pe_arch.py "${{ matrix.pe_arch }}" "$BIN/${{ matrix.binary }}"
+      - name: Every import loads on Windows 7
+        if: matrix.name == 'windows-x86'
+        run: python ../tools/check_win7_imports.py "$BIN/${{ matrix.binary }}"
       - name: The launcher starts
         env:
           HORIZON_LAUNCHER_NO_SELF_UPDATE: '1'
@@ -411,9 +435,98 @@ jobs:
           name: ${{ matrix.asset }}
           path: launcher/out/*
           retention-days: 3
+  web:
+    needs: decide
+    name: web launcher
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    # A web hiccup never holds the game and launcher releases: the release step warns when
+    # the zip is missing, as it does for the optional native builds.
+    continue-on-error: true
+    env:
+      # The same pins and repository the desktop launcher builds with.
+      HORIZON_GAME_REPO: ${{ github.repository }}
+      HORIZON_LAUNCHER_VERSION: ${{ needs.decide.outputs.version }}
+      HORIZON_LAUNCHER_TAG: ${{ needs.decide.outputs.launcher_tag }}
+    defaults:
+      run:
+        working-directory: launcher/web
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.decide.outputs.head }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: launcher/web
+          shared-key: fork-web
+      - name: The web launcher's tests
+        # The plan and the pins' checks, as the launcher's own tests run on Linux.
+        run: cargo test --release --locked
+      - name: Build the web launcher
+        run: cargo build --release --locked --lib --target wasm32-unknown-unknown
+      - name: wasm-bindgen's version, the one the lockfile pins
+        id: bindgen
+        run: |
+          version=$(grep -A1 'name = "wasm-bindgen"' Cargo.lock | grep -oP '(?<=version = ")[^"]+' | head -1)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@${{ steps.bindgen.outputs.version }}
+      - name: binaryen, for wasm-opt
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends binaryen
+      - name: The site
+        run: |
+          set -euo pipefail
+          mkdir -p out/site
+          wasm-bindgen --target web --no-typescript --out-dir out/site             target/wasm32-unknown-unknown/release/horizon_web.wasm
+          cp index.html out/site/
+          # The release profile keeps no strip (wasm-bindgen reads the target-features
+          # section); wasm-opt optimises, and strips, the output.
+          if wasm-opt -Oz --strip-dwarf -o opt.wasm out/site/horizon_web_bg.wasm; then
+            mv opt.wasm out/site/horizon_web_bg.wasm
+          else
+            echo "::warning::wasm-opt failed; shipping the unoptimised build"
+          fi
+          (cd out/site && zip -qr "$OLDPWD/out/horizon-launcher-web.zip" .)
+          ls -l out out/site
+      - uses: actions/upload-artifact@v7
+        with:
+          name: horizon-launcher-web.zip
+          path: launcher/web/out/horizon-launcher-web.zip
+          if-no-files-found: error
+          retention-days: 3
+      - name: The Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: launcher/web/out/site
+
+  pages:
+    needs: [decide, web]
+    name: the web launcher, on Pages
+    if: always() && needs.web.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Publishing needs its own permissions (the workflow's own is contents: read) and the
+    # repository's Pages set to deploy from a workflow.
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+      - uses: actions/deploy-pages@v4
+        id: deployment
+
   sign:
-    needs: [decide, game, launcher]
-    if: always() && needs.decide.outputs.release == 'yes' && needs.game.result != 'failure' && needs.launcher.result != 'failure'
+    needs: [decide, game, launcher, web]
+    if: always() && needs.decide.outputs.release == 'yes' && needs.game.result != 'failure' && needs.launcher.result != 'failure' && needs.web.result != 'failure'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -512,7 +625,7 @@ jobs:
           for file in horizon-windows-arm64.zip horizon-windows-x86.zip horizon-macos-arm64.zip horizon-macos-x64.zip; do
             [[ -f "release-game/$file" ]] || echo "::warning::$file did not build: this release goes out without it"
           done
-          for file in horizon-launcher-windows-arm64.zip horizon-launcher-windows-x86.zip horizon-launcher-macos-arm64.zip horizon-launcher-macos-x64.zip; do
+          for file in horizon-launcher-windows-arm64.zip horizon-launcher-windows-x86.zip horizon-launcher-macos-arm64.zip horizon-launcher-macos-x64.zip horizon-launcher-web.zip; do
             [[ -f "release-launcher/$file" ]] || echo "::warning::$file did not build: this release goes out without it"
           done
       - name: The signatures, checked as launchers check them
@@ -541,11 +654,15 @@ jobs:
           Horizon $1 (fork build $VERSION)
 
           Built by this fork's own workflow from commit ${HEAD:0:7}: the launcher and the game
-          for Windows x64, 32-bit Windows, Linux x86-64 and macOS.
+          for Windows x64, 32-bit Windows, Linux x86-64 and macOS, and in the browser.
 
           - **Download Minecraft directly in the launcher**: Play's "Download directly" needs no
             other launcher and no sign-in, as horizon-android's in-app installer does.
-          - **32-bit Windows builds** (the "-x86" files) for old PCs, with the C runtime linked in.
+          - **32-bit Windows builds** (the "-x86" files) that run on **Windows 7 SP1** and newer,
+            with the C runtime linked in and every import checked to load on a clean Windows 7.
+          - **The web launcher** (`horizon-launcher-web.zip`, and the same app on this fork's
+            GitHub Pages): the releases, and the pinned Minecraft's files from Mojang, checked,
+            resumable, no install.
           - **The Legacy graphics preset** (Video Settings, the Simple level): render distance 4,
             nothing decorative, for the oldest machines.
           - On 64-bit Windows a 32-bit launcher whose release has no 32-bit game build installs

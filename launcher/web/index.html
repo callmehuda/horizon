@@ -1,0 +1,74 @@
+<!doctype html>
+<!-- Horizon's web launcher: index.html and the two files the build makes of it
+     (horizon_web.js and horizon_web_bg.wasm, from `wasm-bindgen --target web`). The page's
+     own glue — downloads through fetch, files through the File System Access API — is
+     compiled into horizon_web.js with the app (launcher/web/js/glue.js). -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Horizon</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0919'/%3E%3Cpath d='M8 8h16v16H8z' fill='none'/%3E%3Cpath d='M8 8v16h16V8z' fill='%236b4bff' fill-opacity='.9'/%3E%3Cpath d='M8 8l8 8 8-8M8 24l8-8' stroke='%230a0919' stroke-width='2'/%3E%3C/svg%3E" />
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        /* The glass look's PAGE token (crates/horizon-theme). */
+        background: #0a0919;
+        color: #f2effc;
+        font-family: Geist, system-ui, sans-serif;
+      }
+      #horizon {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      #starting {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 12px;
+        pointer-events: none;
+      }
+      #starting h1 {
+        font-size: 28px;
+        letter-spacing: 4px;
+        margin: 0;
+        color: #6b4bff;
+      }
+      #starting p {
+        margin: 0;
+        color: #a8a1c4;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="horizon"></canvas>
+    <div id="starting">
+      <h1>HORIZON</h1>
+      <p id="starting-note">Loading the web launcher…</p>
+    </div>
+    <script type="module">
+      import init from "./horizon_web.js";
+      const note = document.getElementById("starting-note");
+      init()
+        .then(() => {
+          // eframe takes the canvas once wasm is in.
+          document.getElementById("starting").remove();
+        })
+        .catch((error) => {
+          note.textContent =
+            "The web launcher could not load: " + error +
+            " — a browser with WebGL2 (Chrome, Edge, Firefox 56+) is needed.";
+        });
+    </script>
+  </body>
+</html>

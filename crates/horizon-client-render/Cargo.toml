@@ -63,7 +63,10 @@ zip = { version = "9.1.3", default-features = false, features = ["deflate"] }
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", default-features = false, features = ["std", "time"] }
 
-[target.'cfg(windows)'.dependencies]
+# Windows 7 has no D3D12: the win7 targets (the 32-bit builds) leave the dx12 backend out,
+# so the game loads there and renders through Vulkan or OpenGL instead. Every other Windows
+# build keeps it: on Windows 8 and newer it is the best backend.
+[target.'cfg(all(windows, not(target_vendor = "win7")))'.dependencies]
 wgpu = { version = "30.0.1", default-features = false, features = ["dx12"] }
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]

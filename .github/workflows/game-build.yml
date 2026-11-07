@@ -111,10 +111,12 @@ jobs:
             pe_arch: x64
             # The C runtime linked in, so the game runs without the Visual C++ redistributable.
             rustflags: -C target-feature=+crt-static
-          # 32-bit Windows: old PCs (the fork's addition; i686 cross-built on the x64 runner).
+          # 32-bit Windows: old PCs (the fork's addition): Windows 7's baseline
+          # (i686-win7-windows-msvc, std built on nightly), as build.yml builds it.
           - name: windows-x86
             os: windows-latest
-            target: i686-pc-windows-msvc
+            target: i686-win7-windows-msvc
+            toolchain: nightly
             dir: horizon-windows-x86
             asset: horizon-windows-x86.zip
             exe: .exe
@@ -166,9 +168,10 @@ jobs:
           # may end up in a release. target/ is rebuilt from scratch; .local/ is relinked by vanilla-data.sh, which
           # keeps its preparations outside the checkout.
           clean: true
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@${{ matrix.toolchain || 'stable' }}
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.toolchain == 'nightly' && '' || matrix.target }}
+          components: ${{ matrix.toolchain == 'nightly' && 'rust-src' || '' }}
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted' && !matrix.musl
         with:
@@ -180,7 +183,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
       - name: Build the client, horizon-ctl, horizon-prepare and horizon-server
         if: ${{ !matrix.musl }}
-        run: cargo build --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }} -p horizon-client -p horizon-client-lib --bin horizon-client --bin horizon-ctl -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server
+        # -Z build-std compiles std for the win7 target (nightly only).
+        run: cargo build --release --locked ${{ matrix.toolchain == 'nightly' && '-Z build-std' || '' }} ${{ matrix.target && format('--target {0}', matrix.target) || '' }} -p horizon-client -p horizon-client-lib --bin horizon-client --bin horizon-ctl -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server
       - name: Every program the release folder takes was built
         if: ${{ !matrix.musl }}
         run: |
@@ -191,6 +195,12 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           python tools/check_pe_arch.py "${{ matrix.pe_arch }}" \
+            "$BIN/horizon-client${{ matrix.exe }}" "$BIN/horizon-ctl${{ matrix.exe }}" \
+            "$BIN/horizon-prepare${{ matrix.exe }}" "$BIN/horizon-server${{ matrix.exe }}"
+      - name: Every import loads on Windows 7
+        if: matrix.name == 'windows-x86'
+        run: |
+          python tools/check_win7_imports.py \
             "$BIN/horizon-client${{ matrix.exe }}" "$BIN/horizon-ctl${{ matrix.exe }}" \
             "$BIN/horizon-prepare${{ matrix.exe }}" "$BIN/horizon-server${{ matrix.exe }}"
       - name: The signing keychain, unlocked
