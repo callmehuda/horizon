@@ -11,7 +11,10 @@ log = "0.4"
 
 # NarratorWindows: SAPI's SpVoice over COM, the voice the Windows narrator settings pick.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_Media_Speech", "Win32_System_Com"] }
+# 0.54, not 0.62: windows-core 0.62 links CoTaskMemAlloc and its kind against combase.dll
+# (Windows 8's), which a Windows 7 build then cannot even load — 0.54 binds them to ole32,
+# which Windows 7 has. cpal already carries the 0.54 line, so this adds no dependency.
+windows = { version = "0.54.0", features = ["Win32_Foundation", "Win32_Media_Speech", "Win32_System_Com"] }
 
 # NarratorLinux: flite and its cmu_us_kal16 voice, opened at run time as JNA does.
 [target.'cfg(target_os = "linux")'.dependencies]
