@@ -26,14 +26,6 @@ The folder is the player's own, chosen with the browser's File System Access API
 browser: downloads go straight from Mojang, the sha1s are computed by the browser's own
 Web Crypto.
 
-The web launcher is also usable in a current Android browser with WebGL2 (Chrome is the
-recommended target). Its canvas uses the dynamic mobile viewport and routes touch input to
-the UI; known-size downloads use one preallocated buffer to avoid retaining a second copy of
-every network chunk. Folder picking depends on the browser's File System Access API, so if
-that API is unavailable the release links still work but the Minecraft file download/verify
-actions that need a chosen folder are unavailable. This browser edition is a launcher and
-file checker, **not** the Minecraft game client; the native game builds remain desktop targets.
-
 ## Building it
 
 ```sh
