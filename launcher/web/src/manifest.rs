@@ -32,7 +32,7 @@ impl DownloadFile {
     /// The file with the version JSON's own url and sha1 (the first sha1 `Pins` holds).
     pub fn version_json(version: &str, manifests: &[&str]) -> DownloadFile {
         DownloadFile {
-            url: version_file_url(version, &manifests[0]),
+            url: version_file_url(version, manifests[0]),
             sha1: manifests[0].to_string(),
             size: None,
             path: format!("versions/{version}/{version}.json"),
@@ -85,7 +85,10 @@ pub fn plan(version_json: &str, client_sha1: &str) -> Result<Vec<DownloadFile>, 
         url: text(index, "url", "assetIndex")?,
         sha1: text(index, "sha1", "assetIndex")?,
         size: index["size"].as_u64(),
-        path: format!("assets/indexes/{}.json", relative(&text(index, "id", "assetIndex")?)?),
+        path: format!(
+            "assets/indexes/{}.json",
+            relative(&text(index, "id", "assetIndex")?)?
+        ),
     };
     Ok(match log_config {
         Some(config) => vec![jar, config, index],
@@ -124,7 +127,9 @@ pub fn relative(path: &str) -> Result<String, String> {
         }
         rest = tail;
     }
-    (!parts.is_empty()).then(|| parts.join("/")).ok_or_else(refuse)
+    (!parts.is_empty())
+        .then(|| parts.join("/"))
+        .ok_or_else(refuse)
 }
 
 #[cfg(test)]
@@ -186,7 +191,15 @@ mod tests {
         assert_eq!(relative("./x").unwrap(), "x");
         assert_eq!(relative("a\\b.txt").unwrap(), "a/b.txt");
         for bad in [
-            "..", "../x", "a/../../x", "/abs", "\\abs", "C:/x", "C:", "a/b:c", "",
+            "..",
+            "../x",
+            "a/../../x",
+            "/abs",
+            "\\abs",
+            "C:/x",
+            "C:",
+            "a/b:c",
+            "",
         ] {
             assert!(relative(bad).is_err(), "{bad:?} should be refused");
         }
@@ -216,6 +229,8 @@ mod tests {
     #[test]
     fn a_version_file_without_the_client_names_the_missing_part() {
         let broken = r#"{"id": "26.3"}"#;
-        assert!(plan(broken, "").unwrap_err().contains("downloads.client.url"));
+        assert!(plan(broken, "")
+            .unwrap_err()
+            .contains("downloads.client.url"));
     }
 }

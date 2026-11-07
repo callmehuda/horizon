@@ -9,15 +9,18 @@ use std::path::Path;
 
 fn main() {
     let dir = env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
-    for name in ["HORIZON_GAME_REPO", "HORIZON_LAUNCHER_VERSION", "HORIZON_LAUNCHER_TAG"] {
+    for name in [
+        "HORIZON_GAME_REPO",
+        "HORIZON_LAUNCHER_VERSION",
+        "HORIZON_LAUNCHER_TAG",
+    ] {
         println!("cargo:rerun-if-env-changed={name}");
     }
     let lock = Path::new(&dir).join("../../research-lock.json");
     println!("cargo:rerun-if-changed={}", lock.display());
-    let text = fs::read_to_string(&lock)
-        .unwrap_or_else(|e| panic!("{}: {e}", lock.display()));
-    let json: serde_json::Value = serde_json::from_str(&text)
-        .unwrap_or_else(|e| panic!("{}: {e}", lock.display()));
+    let text = fs::read_to_string(&lock).unwrap_or_else(|e| panic!("{}: {e}", lock.display()));
+    let json: serde_json::Value =
+        serde_json::from_str(&text).unwrap_or_else(|e| panic!("{}: {e}", lock.display()));
     let game = &json["minecraft"];
     let strings = |key: &str| -> String {
         game[key]
@@ -54,6 +57,5 @@ fn main() {
         quote(&indexes),
     );
     let out_dir = env::var("OUT_DIR").unwrap();
-    fs::write(Path::new(&out_dir).join("pins.rs"), out)
-        .expect("writing OUT_DIR/pins.rs");
+    fs::write(Path::new(&out_dir).join("pins.rs"), out).expect("writing OUT_DIR/pins.rs");
 }

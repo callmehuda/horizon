@@ -133,9 +133,8 @@ where
     #[cfg(target_arch = "wasm32")]
     {
         use wasm_bindgen::closure::Closure;
-        let told = move |loaded: f64, total: f64| {
-            progress(loaded.max(0.) as u64, total.max(0.) as u64)
-        };
+        let told =
+            move |loaded: f64, total: f64| progress(loaded.max(0.) as u64, total.max(0.) as u64);
         let closure: Closure<dyn FnMut(f64, f64)> = Closure::wrap(Box::new(told));
         let function = js_sys::Function::from(closure.as_ref().clone());
         let promise = crate::glue::fetchBytes(url, &function);
@@ -170,7 +169,10 @@ pub async fn fetch_text(url: &str) -> Result<String, String> {
 /// Awaits a JS promise, turning a rejection into a message (an Error's message, or a thrown
 /// string) with `what` in front.
 #[cfg(target_arch = "wasm32")]
-pub(crate) async fn await_js(promise: js_sys::Promise, what: &str) -> Result<wasm_bindgen::JsValue, String> {
+pub(crate) async fn await_js(
+    promise: js_sys::Promise,
+    what: &str,
+) -> Result<wasm_bindgen::JsValue, String> {
     match wasm_bindgen_futures::JsFuture::from(promise).await {
         Ok(value) => Ok(value),
         Err(error) => Err(format!("{what}: {}", js_message(&error))),

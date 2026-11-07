@@ -250,7 +250,11 @@ impl App {
 
     fn minecraft(&mut self, ui: &mut egui::Ui) {
         let lang = self.lang;
-        heading(ui, format!("{} {}", lang.t(Key::mc_title), pins::MC_VERSION), 22.);
+        heading(
+            ui,
+            format!("{} {}", lang.t(Key::mc_title), pins::MC_VERSION),
+            22.,
+        );
         dim(ui, lang.t(Key::mc_intro));
         ui.add_space(10.);
         card(ui, |ui| {
@@ -277,7 +281,11 @@ impl App {
             }
             Folder::Ready => {
                 ui.colored_label(color(glass::LIVE), lang.t(Key::mc_folder_ready));
-                ui.monospace(egui::RichText::new(platform::folder_name()).weak().color(TEXT));
+                ui.monospace(
+                    egui::RichText::new(platform::folder_name())
+                        .weak()
+                        .color(TEXT),
+                );
             }
         }
         ui.add_space(6.);
@@ -286,10 +294,7 @@ impl App {
             _ => lang.t(Key::mc_pick_folder),
         };
         if ui
-            .add_enabled(
-                platform::can_pick_folder(),
-                egui::Button::new(pick_label),
-            )
+            .add_enabled(platform::can_pick_folder(), egui::Button::new(pick_label))
             .clicked()
         {
             let inner = self.inner.clone();
@@ -362,7 +367,14 @@ impl App {
         let state = self.inner.borrow();
         match &state.download {
             Download::Idle => {}
-            Download::Running { done, total, bytes, total_bytes, current, log } => {
+            Download::Running {
+                done,
+                total,
+                bytes,
+                total_bytes,
+                current,
+                log,
+            } => {
                 let fraction = if *total_bytes > 0 {
                     (*bytes as f32 / *total_bytes as f32).clamp(0., 1.)
                 } else {
@@ -377,10 +389,11 @@ impl App {
                         done,
                         total
                     ));
-                    ui.add(
-                        egui::ProgressBar::new(fraction)
-                            .text(format!("{} / {}", size_text(*bytes), size_text(*total_bytes))),
-                    );
+                    ui.add(egui::ProgressBar::new(fraction).text(format!(
+                        "{} / {}",
+                        size_text(*bytes),
+                        size_text(*total_bytes)
+                    )));
                     ui.add_space(4.);
                     dim(
                         ui,
@@ -431,7 +444,10 @@ fn start_releases(inner: &Rc<RefCell<Inner>>) {
     inner.borrow_mut().releases = Releases::Loading;
     let inner = inner.clone();
     platform::spawn(async move {
-        let url = format!("https://api.github.com/repos/{}/releases?per_page=8", pins::REPO);
+        let url = format!(
+            "https://api.github.com/repos/{}/releases?per_page=8",
+            pins::REPO
+        );
         let answer = platform::fetch_text(&url).await.and_then(|text| {
             serde_json::from_str::<Vec<GhRelease>>(&text)
                 .map_err(|e| format!("GitHub's releases: {e}"))
@@ -498,7 +514,10 @@ async fn run_download(inner: &Rc<RefCell<Inner>>) -> Result<Vec<String>, String>
         Some(sha1) if pins::MC_MANIFESTS.contains(&sha1.as_str()) => {
             {
                 let mut state = inner.borrow_mut();
-                log(&mut state, format!("The {v} version file is already there, kept"));
+                log(
+                    &mut state,
+                    format!("The {v} version file is already there, kept"),
+                );
             }
             let bytes = platform::read_file(&version_file.path).await?;
             finish_file(inner, 0);
@@ -507,7 +526,10 @@ async fn run_download(inner: &Rc<RefCell<Inner>>) -> Result<Vec<String>, String>
         _ => {
             {
                 let mut state = inner.borrow_mut();
-                log(&mut state, format!("Downloading the {v} version file from Mojang"));
+                log(
+                    &mut state,
+                    format!("Downloading the {v} version file from Mojang"),
+                );
             }
             let bytes = fetch_file(inner, &version_file, 0).await?;
             let sha1 = sha1_hex(&bytes);
@@ -525,7 +547,10 @@ async fn run_download(inner: &Rc<RefCell<Inner>>) -> Result<Vec<String>, String>
     let files = manifest::plan(&json_text, pins::MC_CLIENT_SHA1)?;
     {
         let mut state = inner.borrow_mut();
-        if let Download::Running { total, total_bytes, .. } = &mut state.download {
+        if let Download::Running {
+            total, total_bytes, ..
+        } = &mut state.download
+        {
             *total = 1 + files.len();
             *total_bytes = files.iter().map(|file| file.size.unwrap_or(0)).sum();
         }
@@ -597,7 +622,12 @@ async fn fetch_file(
 /// Counts the file under way done.
 fn finish_file(inner: &Rc<RefCell<Inner>>, bytes: u64) {
     let mut state = inner.borrow_mut();
-    if let Download::Running { done, bytes: so_far, .. } = &mut state.download {
+    if let Download::Running {
+        done,
+        bytes: so_far,
+        ..
+    } = &mut state.download
+    {
         *done += 1;
         *so_far = bytes;
     }
@@ -737,15 +767,16 @@ fn small_heading(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>) {
 }
 
 fn dim(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>) {
-    ui.label(
-        text.into()
-            .color(egui::Color32::from_rgb(0xa8, 0xa1, 0xc4)),
-    );
+    ui.label(text.into().color(egui::Color32::from_rgb(0xa8, 0xa1, 0xc4)));
 }
 
 fn bullet(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>) {
     ui.horizontal(|ui| {
-        ui.label(<egui::WidgetText as From<&str>>::from("·").color(color(glass::ACCENT)).strong());
+        ui.label(
+            <egui::WidgetText as From<&str>>::from("·")
+                .color(color(glass::ACCENT))
+                .strong(),
+        );
         dim(ui, text);
     });
 }
@@ -862,10 +893,10 @@ fn size_text(size: u64) -> String {
 /// runs everywhere).
 fn recommended_asset() -> Option<String> {
     let agent = platform::user_agent().to_ascii_lowercase();
-    let _64 = agent.contains("win64") || agent.contains("x64") || agent.contains("wow64");
-    let arm = agent.contains("arm");
+    let is_64_bit = agent.contains("win64") || agent.contains("x64") || agent.contains("wow64");
+    let is_arm = agent.contains("arm");
     if agent.contains("windows") {
-        Some(match (_64, arm) {
+        Some(match (is_64_bit, is_arm) {
             (true, false) => "horizon-launcher-windows-x64.zip".into(),
             (false, false) => "horizon-launcher-windows-x86.zip".into(),
             (_, true) => "horizon-launcher-windows-arm64.zip".into(),
@@ -916,7 +947,11 @@ impl eframe::App for App {
                     {
                         self.lang = other;
                     }
-                    ui.label(egui::RichText::new(format!("v{}", pins::VERSION)).small().weak());
+                    ui.label(
+                        egui::RichText::new(format!("v{}", pins::VERSION))
+                            .small()
+                            .weak(),
+                    );
                 });
             });
             ui.add_space(6.);
@@ -960,7 +995,11 @@ pub fn web_start() -> Result<(), JsValue> {
     let canvas = eframe::web_sys::window()
         .and_then(|window| window.document())
         .and_then(|document| document.get_element_by_id("horizon"))
-        .and_then(|element| element.dyn_into::<eframe::web_sys::HtmlCanvasElement>().ok())
+        .and_then(|element| {
+            element
+                .dyn_into::<eframe::web_sys::HtmlCanvasElement>()
+                .ok()
+        })
         .expect("index.html holds the canvas #horizon");
     let options = eframe::WebOptions::default();
     wasm_bindgen_futures::spawn_local(async move {

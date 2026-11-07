@@ -33,11 +33,7 @@ fn main() {
                 continue;
             };
             for krate in crates.flatten() {
-                if !krate
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with(&wanted)
-                {
+                if !krate.file_name().to_string_lossy().starts_with(&wanted) {
                     continue;
                 }
                 let lib = krate.path().join("lib");
