@@ -70,14 +70,16 @@ def pe_machine_is_32bit(data):
 
 
 def pe_imports(data):
-    """DLL names in a PE file's import and delay-import tables."""
+    """DLL names in a PE file's import and delay-import tables, each with the
+    functions it takes: {dll: [name, ...]}, so a refused DLL can say what pulled it."""
     pe = struct.unpack_from("<I", data, 0x3C)[0]
     if data[pe:pe + 4] != b"PE\0\0":
         raise ValueError("not a PE file")
     sections_count, optional_size = struct.unpack_from("<H12xH", data, pe + 6)
     optional = pe + 24
     magic = struct.unpack_from("<H", data, optional)[0]
-    directories = optional + (112 if magic == 0x20B else 96)
+    pe32plus = magic == 0x20B
+    directories = optional + (112 if pe32plus else 96)
     sections = [struct.unpack_from("<8xIIII", data, optional + optional_size + 40 * i)
                 for i in range(sections_count)]
 
@@ -91,17 +93,39 @@ def pe_imports(data):
         start = offset(rva)
         return data[start:data.index(b"\0", start)].decode("ascii")
 
-    names = []
-    # Directory 1: imports (20-byte descriptors, name at +12); 13: delay imports (32 bytes, name at +4).
-    for index, size, name_field in ((1, 20, 12), (13, 32, 4)):
+    def thunk_names(rva):
+        """The import-by-name table a thunk RVA points at (an import count for the
+        check's own sanity, too)."""
+        at = offset(rva)
+        names = []
+        while True:
+            entry = struct.unpack_from("<I" if not pe32plus else "<Q", data, at)[0]
+            if entry == 0:
+                return names
+            if entry & (0x80000000 if not pe32plus else 0x8000000000000000):
+                names.append(f"ordinal{entry & 0xFFFF}")  # by ordinal: no name to read
+            else:
+                # IMAGE_IMPORT_BY_NAME: a 2-byte hint, then the name.
+                names.append(name_at(entry + 2))
+            at += 4 if not pe32plus else 8
+
+    imports = {}
+    # Directory 1: imports (20-byte descriptors, name at +12, thunks at +16 and +0);
+    # 13: delay imports (32 bytes, name at +4, thunks at +20 (attributes stripped)).
+    for index, size, name_field, thunk_field, mask in ((1, 20, 12, 16, 0), (13, 32, 4, 20, 1)):
         rva = struct.unpack_from("<I", data, directories + 8 * index)[0]
         if not rva:
             continue
         at = offset(rva)
         while any(data[at:at + size]):
-            names.append(name_at(struct.unpack_from("<I", data, at + name_field)[0]))
+            dll = name_at(struct.unpack_from("<I", data, at + name_field)[0])
+            thunks = struct.unpack_from("<I", data, at + thunk_field)[0] & ~mask
+            if thunks:
+                imports.setdefault(dll, []).extend(thunk_names(thunks))
+            else:
+                imports.setdefault(dll, [])
             at += size
-    return names
+    return imports
 
 
 def check(path):
@@ -111,16 +135,18 @@ def check(path):
     problems = []
     if not pe_machine_is_32bit(data):
         problems.append("is not a 32-bit PE (machine i386), which Windows 7 builds are")
-    for name in pe_imports(data):
+    imports = pe_imports(data)
+    for name, functions in imports.items():
         lower = name.lower()
         if windows7_allowed(name):
             continue
         reason = next((why for start, why in WINDOWS7_MISSING if start in lower), None)
+        where = f" ({', '.join(functions)})" if functions else ""
         if reason:
-            problems.append(f"imports {name}: {reason}")
+            problems.append(f"imports {name}{where}: {reason}")
         else:
-            problems.append(f"imports {name}, which a clean Windows 7 does not ship")
-    names = sorted({name.lower() for name in pe_imports(data)})
+            problems.append(f"imports {name}{where}, which a clean Windows 7 does not ship")
+    names = sorted(name.lower() for name in imports)
     print(f"{path}: {', '.join(names)}")
     for problem in problems:
         print(f"  {path} {problem}", file=sys.stderr)
