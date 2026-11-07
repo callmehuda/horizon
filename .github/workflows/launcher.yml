@@ -139,12 +139,12 @@ jobs:
             # The C runtime linked in: without it the launcher asks for VCRUNTIME140.dll,
             # which only the Visual C++ redistributable installs.
             rustflags: -C target-feature=+crt-static
-          # 32-bit Windows, for old PCs: Windows 7's baseline (i686-win7-windows-msvc,
-          # std built on nightly), cross-built on the x64 runner, as build.yml builds it.
+          # 32-bit Windows, for old PCs: i686 cross-built on the x64 runner (the launcher's
+          # window is Windows 10's — GPUI's DirectComposition; the game has a Windows 7
+          # build of its own).
           - name: windows-x86
             os: windows-latest
-            target: i686-win7-windows-msvc
-            toolchain: nightly
+            target: i686-pc-windows-msvc
             asset: horizon-launcher-windows-x86.zip
             binary: horizon-launcher.exe
             pe_arch: x86
@@ -192,11 +192,7 @@ jobs:
           clean: true
       - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: ${{ matrix.toolchain || 'stable' }}
-          # (An empty string is falsy in GitHub expressions: the target only when it is
-          # not the nightly — the win7 build needs no rustup target, it builds its own std.)
-          targets: ${{ matrix.toolchain != 'nightly' && matrix.target || '' }}
-          components: ${{ matrix.toolchain == 'nightly' && 'rust-src' || '' }}
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted'
         with:
@@ -218,13 +214,10 @@ jobs:
           fi
       # Every test target (the library, the binary, tests/), on each system the launcher ships for.
       - run: cargo test --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }} ${LAUNCHER_FEATURES:+--features "$LAUNCHER_FEATURES"}
-      - run: cargo build --release --locked ${{ matrix.toolchain == 'nightly' && '-Z build-std' || '' }} ${{ matrix.target && format('--target {0}', matrix.target) || '' }} ${LAUNCHER_FEATURES:+--features "$LAUNCHER_FEATURES"}
+      - run: cargo build --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }} ${LAUNCHER_FEATURES:+--features "$LAUNCHER_FEATURES"}
       - name: Verify Windows executable architecture
         if: runner.os == 'Windows'
         run: python ../tools/check_pe_arch.py "${{ matrix.pe_arch }}" "$BIN/${{ matrix.binary }}"
-      - name: Every import loads on Windows 7
-        if: matrix.name == 'windows-x86'
-        run: python ../tools/check_win7_imports.py "$BIN/${{ matrix.binary }}"
       - name: The version is the release's
         run: |
           out=$("$BIN/${{ matrix.binary }}" --version)

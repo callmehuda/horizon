@@ -186,8 +186,18 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
       - name: Build the client, horizon-ctl, horizon-prepare and horizon-server
         if: ${{ !matrix.musl }}
-        # -Z build-std compiles std for the win7 target (nightly only).
-        run: cargo build --release --locked ${{ matrix.toolchain == 'nightly' && '-Z build-std' || '' }} ${{ matrix.target && format('--target {0}', matrix.target) || '' }} -p horizon-client -p horizon-client-lib --bin horizon-client --bin horizon-ctl -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server
+        # -Z build-std compiles std for the win7 target (nightly only); that client leaves
+        # the controllers out (gilrs reads them through Windows 10's WinRT Gaming_Input,
+        # whose imports a clean Windows 7 cannot load).
+        run: |
+          if [[ "${{ matrix.name }}" == "windows-x86" ]]; then
+            cargo build --release --locked -Z build-std --target ${{ matrix.target }} \
+              -p horizon-client --no-default-features --features audio --bin horizon-client
+            cargo build --release --locked -Z build-std --target ${{ matrix.target }} \
+              -p horizon-client-lib --bin horizon-ctl -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server
+          else
+            cargo build --release --locked ${{ matrix.toolchain == 'nightly' && '-Z build-std' || '' }} ${{ matrix.target && format('--target {0}', matrix.target) || '' }} -p horizon-client -p horizon-client-lib --bin horizon-client --bin horizon-ctl -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server
+          fi
       - name: Every program the release folder takes was built
         if: ${{ !matrix.musl }}
         run: |

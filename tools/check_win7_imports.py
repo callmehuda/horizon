@@ -29,8 +29,8 @@ WINDOWS7_SYSTEM = {
     "kernelbase.dll", "mfplat.dll", "mmdevapi.dll", "msvcrt.dll", "ncrypt.dll",
     "ntdll.dll", "ole32.dll", "oleacc.dll", "oleaut32.dll", "opengl32.dll",
     "propsys.dll", "secur32.dll", "setupapi.dll", "shell32.dll", "shlwapi.dll",
-    "user32.dll", "userenv.dll", "uxtheme.dll", "version.dll", "winmm.dll",
-    "wintrust.dll", "ws2_32.dll", "wsock32.dll",
+    "user32.dll", "userenv.dll", "uiautomationcore.dll", "uxtheme.dll", "version.dll",
+    "winmm.dll", "wintrust.dll", "ws2_32.dll", "wsock32.dll",
 }
 
 # What Windows 7 does not have, named for the error message: every API set (the schema

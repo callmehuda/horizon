@@ -13,9 +13,11 @@ name: build
 #              32-bit Windows (i686-win7-windows-msvc: Windows 7 SP1 and newer, std built for
 #              the win7 baseline with nightly -Zbuild-std), Linux x86-64 (+ the server folder)
 #              and macOS (Apple Silicon, and Intel cross-built), packaged by xtask.
-#   launcher   horizon-launcher on the same five platforms (the 32-bit one a Windows 7 build
-#              too), built with HORIZON_GAME_REPO so it installs this fork's game builds and
-#              updates itself from this fork's releases.
+#   launcher   horizon-launcher on the same five platforms, built with HORIZON_GAME_REPO so it
+#              installs this fork's game builds and updates itself from this fork's releases.
+#              (Its window is Windows 10's — GPUI renders through DirectComposition and links
+#              Windows 10's ICU — so the Windows 7 build is the game's; on 7 the web launcher
+#              downloads and the game's own horizon-prepare prepares.)
 #   web        horizon-web, the launcher's browser edition (launcher/web), on GitHub Pages:
 #              the fork's releases, and the pinned Minecraft's files from Mojang, in the
 #              browser. horizon-launcher-web.zip goes on the launcher release with the rest.
@@ -242,8 +244,19 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
       - name: Build the client, horizon-ctl, horizon-prepare and horizon-server
-        # -Z build-std compiles std for the win7 target (nightly only).
-        run: cargo build --release --locked ${{ matrix.toolchain == 'nightly' && '-Z build-std' || '' }} ${{ matrix.target && format('--target {0}', matrix.target) || '' }} -p horizon-client -p horizon-client-lib --bin horizon-client --bin horizon-ctl -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server
+        # -Z build-std compiles std for the win7 target (nightly only). The win7 client
+        # leaves the controllers out: gilrs reads them through Windows 10's WinRT
+        # Gaming_Input, whose imports a clean Windows 7 cannot load — keyboard and mouse
+        # remain, and horizon-ctl's virtual pad.
+        run: |
+          if [[ "${{ matrix.name }}" == "windows-x86" ]]; then
+            cargo build --release --locked -Z build-std --target ${{ matrix.target }} \
+              -p horizon-client --no-default-features --features audio --bin horizon-client
+            cargo build --release --locked -Z build-std --target ${{ matrix.target }} \
+              -p horizon-client-lib --bin horizon-ctl -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server
+          else
+            cargo build --release --locked ${{ matrix.toolchain == 'nightly' && '-Z build-std' || '' }} ${{ matrix.target && format('--target {0}', matrix.target) || '' }} -p horizon-client -p horizon-client-lib --bin horizon-client --bin horizon-ctl -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server
+          fi
       - name: Every program the release folder takes was built
         run: |
           for binary in horizon-client horizon-ctl horizon-prepare horizon-server; do
@@ -342,9 +355,10 @@ jobs:
             rustflags: -C target-feature=+crt-static
           - name: windows-x86
             os: windows-latest
-            # Windows 7's baseline, as the game's windows-x86 (nightly, -Z build-std).
-            target: i686-win7-windows-msvc
-            toolchain: nightly
+            # Not the win7 target: GPUI's window needs DirectComposition and Windows 10's
+            # ICU whatever the baseline is, so this stays the ordinary i686 build and
+            # Windows 7 plays through the web launcher and the game's own files.
+            target: i686-pc-windows-msvc
             asset: horizon-launcher-windows-x86.zip
             binary: horizon-launcher.exe
             pe_arch: x86
@@ -381,11 +395,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: ${{ matrix.toolchain || 'stable' }}
-          # (An empty string is falsy in GitHub expressions: the target only when it is
-          # not the nightly — the win7 build needs no rustup target, it builds its own std.)
-          targets: ${{ matrix.toolchain != 'nightly' && matrix.target || '' }}
-          components: ${{ matrix.toolchain == 'nightly' && 'rust-src' || '' }}
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: launcher
@@ -404,13 +414,10 @@ jobs:
           HORIZON_GAME_REPO: ''
         run: cargo test --release --locked
       - name: Build the launcher
-        run: cargo build --release --locked ${{ matrix.toolchain == 'nightly' && '-Z build-std' || '' }} ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+        run: cargo build --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
       - name: Verify Windows executable architecture
         if: runner.os == 'Windows'
         run: python ../tools/check_pe_arch.py "${{ matrix.pe_arch }}" "$BIN/${{ matrix.binary }}"
-      - name: Every import loads on Windows 7
-        if: matrix.name == 'windows-x86'
-        run: python ../tools/check_win7_imports.py "$BIN/${{ matrix.binary }}"
       - name: The launcher starts
         env:
           HORIZON_LAUNCHER_NO_SELF_UPDATE: '1'
