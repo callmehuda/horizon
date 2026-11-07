@@ -366,6 +366,11 @@ jobs:
           sudo apt-get install -y libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libvulkan-dev libasound2-dev patchelf
       - name: The launcher's tests
         if: matrix.name == 'linux'
+        # Without the fork's repository: the tests assert Horizon's own URLs, and a launcher
+        # built for this fork (the build step below, with the job's env) is checked by CI's
+        # launcher job. build.rs rebuilds the crate when HORIZON_GAME_REPO changes.
+        env:
+          HORIZON_GAME_REPO: ''
         run: cargo test --release --locked
       - name: Build the launcher
         run: cargo build --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
