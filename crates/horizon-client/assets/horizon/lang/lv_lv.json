@@ -472,5 +472,6 @@
   "Pack settings": "Pakotnes iestatījumi",
   "Built-in settings": "Iebūvētie iestatījumi",
   "%s settings": "%s iestatījumi",
-  "Settings made by the pack's author: they change only this pack.": "Pakotnes autora izveidoti iestatījumi: tie maina tikai šo pakotni."
+  "Settings made by the pack's author: they change only this pack.": "Pakotnes autora izveidoti iestatījumi: tie maina tikai šo pakotni.",
+  "Legacy": "Legacy"
 }

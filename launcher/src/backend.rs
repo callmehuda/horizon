@@ -9,7 +9,13 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
-pub const REPO: &str = "horizon-rust/horizon";
+/// Where the launcher's releases (the game it installs, its own updates) come from. A fork that
+/// publishes its own builds sets `HORIZON_GAME_REPO` ("owner/name") at build time; every other
+/// build keeps Horizon's own repository, whose releases this launcher's key already trusts.
+pub const REPO: &str = match option_env!("HORIZON_GAME_REPO") {
+    Some(repo) if !repo.is_empty() => repo,
+    _ => "horizon-rust/horizon",
+};
 pub const README_URL: &str = "https://github.com/horizon-rust/horizon/blob/main/launcher/README.md";
 /// The players' page on connecting an AI agent (the website's docs/agents.md).
 pub const AGENT_DOCS_URL: &str = "https://playhorizon.dev/docs/agents";
@@ -50,8 +56,10 @@ pub struct Release {
 
 /// The release assets of each system Horizon ships for: (OS, architecture, the game, the launcher).
 /// game-build.yml builds the game's, nightly-build.yml signs and publishes them, and launcher.yml
-/// builds the launcher's (`platform_assets_are_published`).
-pub const PLATFORMS: [(&str, &str, &str, &str); 5] = [
+/// builds the launcher's (`platform_assets_are_published`). The x86 entry is the fork's: old,
+/// 32-bit Windows PCs (the launcher there also runs on a 64-bit Windows, whose x64 game it can
+/// fall back to).
+pub const PLATFORMS: [(&str, &str, &str, &str); 6] = [
     (
         "linux",
         "x86_64",
@@ -76,6 +84,12 @@ pub const PLATFORMS: [(&str, &str, &str, &str); 5] = [
         "x86_64",
         "horizon-windows-x64.zip",
         "horizon-launcher-windows-x64.zip",
+    ),
+    (
+        "windows",
+        "x86",
+        "horizon-windows-x86.zip",
+        "horizon-launcher-windows-x86.zip",
     ),
     (
         "windows",
@@ -144,6 +158,8 @@ pub enum GameArchitecture {
     Auto,
     X64,
     Arm64,
+    /// 32-bit Windows: only the x86 launcher picks it (its own architecture), never a choice.
+    X86,
 }
 
 impl GameArchitecture {
@@ -152,6 +168,7 @@ impl GameArchitecture {
             Self::Auto => "auto",
             Self::X64 => "x64",
             Self::Arm64 => "arm64",
+            Self::X86 => "x86",
         }
     }
 
@@ -160,6 +177,7 @@ impl GameArchitecture {
             "auto" | "default" => Some(Self::Auto),
             "x64" | "x86_64" | "amd64" => Some(Self::X64),
             "arm64" | "aarch64" => Some(Self::Arm64),
+            "x86" | "i386" | "i686" => Some(Self::X86),
             _ => None,
         }
     }
@@ -179,6 +197,7 @@ fn architecture_for_platform(architecture: &str) -> Option<GameArchitecture> {
     match architecture {
         "x86_64" => Some(GameArchitecture::X64),
         "aarch64" => Some(GameArchitecture::Arm64),
+        "x86" => Some(GameArchitecture::X86),
         _ => None,
     }
 }
@@ -187,6 +206,7 @@ fn architecture_for_asset(asset: &str) -> Option<GameArchitecture> {
     match asset.rsplit('/').next()? {
         "horizon-windows-x64.zip" => Some(GameArchitecture::X64),
         "horizon-windows-arm64.zip" => Some(GameArchitecture::Arm64),
+        "horizon-windows-x86.zip" => Some(GameArchitecture::X86),
         _ => None,
     }
 }
@@ -288,6 +308,9 @@ fn game_assets_for(
             GameArchitecture::Auto => process,
             GameArchitecture::X64 => "x86_64",
             GameArchitecture::Arm64 => "aarch64",
+            // Never a choice there (can_choose_game_architecture): an x86 build selected only
+            // by the x86 launcher itself, whose Auto is its own architecture anyway.
+            GameArchitecture::X86 => "x86",
         }
     } else {
         process
@@ -305,6 +328,7 @@ fn selected_game_architecture(settings: &Settings) -> Option<GameArchitecture> {
             GameArchitecture::Auto => std::env::consts::ARCH,
             GameArchitecture::X64 => "x86_64",
             GameArchitecture::Arm64 => "aarch64",
+            GameArchitecture::X86 => "x86",
         }
     } else {
         std::env::consts::ARCH
@@ -352,6 +376,7 @@ fn pe_architecture_file(path: &Path) -> Option<GameArchitecture> {
 
 fn architecture_for_pe_machine(machine: u16) -> Option<GameArchitecture> {
     match machine {
+        0x14c => Some(GameArchitecture::X86),
         0x8664 => Some(GameArchitecture::X64),
         0xaa64 => Some(GameArchitecture::Arm64),
         _ => None,
@@ -444,6 +469,7 @@ pub fn game_architecture_launch_error(tag: &str) -> Option<String> {
     let label = |arch| match arch {
         GameArchitecture::X64 => "x64".to_owned(),
         GameArchitecture::Arm64 => "ARM64".to_owned(),
+        GameArchitecture::X86 => "x86".to_owned(),
         GameArchitecture::Auto => crate::i18n::tr("Automatic").to_string(),
     };
     let installed = installed
@@ -461,7 +487,7 @@ pub fn game_architecture_launch_error(tag: &str) -> Option<String> {
 
 /// The asset a platform's launcher falls back to when a release has no build of its own.
 const fn game_fallback_for(os: &str, arch: &str) -> Option<&'static str> {
-    if same(os, "windows") && same(arch, "aarch64") {
+    if same(os, "windows") && (same(arch, "aarch64") || same(arch, "x86")) {
         match platform_assets("windows", "x86_64") {
             Some((game, _)) => Some(game),
             None => None,
@@ -2092,6 +2118,29 @@ fn download_for_owner(
     download_for(pins, dir, pass, !accounts.accounts.is_empty(), fetch, log)
 }
 
+/// Downloads the pinned version straight from Mojang's public endpoints into `dir`, in the
+/// official launcher's layout, with no owner asked — the in-app installer horizon-android ships:
+/// the same pinned files, each checked against the sha1 Mojang lists, and what is already there
+/// and whole is kept. Playing needs your own copy of Minecraft: Java Edition; the log says so.
+fn direct_download(
+    pins: &sources::Pins,
+    dir: &Path,
+    fetch: sources::Fetch,
+    log: &dyn Fn(String),
+) -> Result<(), String> {
+    let os = match sources::Os::current() {
+        sources::Os::Linux => "linux",
+        sources::Os::MacOs => "osx",
+        sources::Os::Windows => "windows",
+    };
+    log(format!(
+        "Downloading Minecraft {} directly from Mojang (you need your own copy of Minecraft: \
+         Java Edition to play)",
+        pins.version
+    ));
+    mojang::download(pins, dir, os, 8, fetch, &mojang::CANCEL, log)
+}
+
 /// Downloads Minecraft `id` (any version on Mojang's list, its version file's sha1 from it) into
 /// Horizon's own game folder, in the official launcher's layout, for an account that owns the
 /// game (asked again now). Returns that folder.
@@ -2368,6 +2417,10 @@ pub enum MinecraftFrom {
     Install,
     /// Mojang, for the signed-in account that owns the game ("Download and prepare").
     Mojang,
+    /// Mojang straight from its public endpoints, no owner asked ("Download directly", the
+    /// in-app installer horizon-android ships): the same pinned, sha1-checked files, before the
+    /// game starts. Playing needs your own copy of Minecraft: Java Edition.
+    Direct,
 }
 
 /// A preparation's steps, in the order they run, as Home names them.
@@ -2446,6 +2499,11 @@ pub fn preparer(
             // Straight from Mojang (what is already there and whole is kept), for an owner only.
             download_for_owner(&pins, &own, &fetch, log)
                 .map_err(|e| e.trim_start_matches("\n  • ").to_string())?;
+            own
+        } else if from == MinecraftFrom::Direct {
+            // Straight from Mojang's public endpoints, no owner asked (horizon-android's
+            // installer): what is already there and whole is kept.
+            direct_download(&pins, &own, &fetch, log)?;
             own
         } else {
             let resolved = sources::resolve(minecraft, &pins, &known, &linked, &fetch, log);
@@ -4782,13 +4840,17 @@ mod tests {
                     .map(move |_| name.as_str())
             })
             .collect();
-        assert_eq!(calls, ["backend.rs"]);
+        // Two call sites, both here: `download_for` (the owner gate's) and the fork's
+        // `direct_download` (horizon-android's in-app installer), which asks no account.
+        assert_eq!(calls, ["backend.rs", "backend.rs"]);
         let backend = &sources.iter().find(|(n, ..)| n == "backend.rs").unwrap().2;
         let body = |f: &str| {
             let start = backend.find(&format!("\nfn {f}(")).unwrap();
             &backend[start..start + backend[start + 1..].find("\n}\n").unwrap()]
         };
         assert!(body("download_for").contains("mojang::download("));
+        assert!(body("direct_download").contains("mojang::download("));
+        assert!(!body("direct_download").contains("account::"));
         assert!(body("download_for_owner").contains("account::launch("));
         assert!(!body("download_for_owner").contains("launch_for_game("));
         // `download_for` is defined once and called once, by `download_for_owner`.
@@ -5235,10 +5297,11 @@ pub fn {f}("
                 build.contains(&format!("asset: {game}")),
                 "game-build.yml builds no {game}"
             );
-            // Signed (SHA256SUMS), then published. Windows ARM64's build may fail without holding the
-            // Nightly, so both steps name it again where they check that it was built.
+            // Signed (SHA256SUMS), then published. Windows ARM64's, musl's and 32-bit Windows's builds may
+            // fail without holding the Nightly, so both steps name them again where they check that they
+            // were built.
             let named = nightly.matches(&format!("dist/{game}")).count();
-            let optional = (os, arch) == ("windows", "aarch64");
+            let optional = matches!((os, arch), ("windows", "aarch64") | ("windows", "x86"));
             assert!(
                 named == 2 || (optional && named > 2),
                 "nightly-build.yml must sign and publish {game} ({os} {arch})"

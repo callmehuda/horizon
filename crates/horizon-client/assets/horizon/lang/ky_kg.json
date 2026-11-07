@@ -465,5 +465,6 @@
   "Pack settings": "Топтом жөндөөлөрү",
   "Built-in settings": "Орнотулган жөндөөлөр",
   "%s settings": "%s жөндөөлөрү",
-  "Settings made by the pack's author: they change only this pack.": "Топтомдун автору жасаган жөндөөлөр: алар ушул топтомду гана өзгөртөт."
+  "Settings made by the pack's author: they change only this pack.": "Топтомдун автору жасаган жөндөөлөр: алар ушул топтомду гана өзгөртөт.",
+  "Legacy": "Legacy"
 }

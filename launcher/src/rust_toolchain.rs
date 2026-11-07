@@ -899,6 +899,12 @@ mod tests {
         // An Intel Mac had a game and a launcher but no compiler (#1161): native builds stopped
         // with "the launcher has none for macos x86_64".
         for (os, arch, game, _) in backend::PLATFORMS {
+            // 32-bit Windows (the fork's platform) ships no native-mod toolchain: none is pinned
+            // for it, and a build there reports that plainly (native_mods' architecture_mismatch).
+            if (os, arch) == ("windows", "x86") {
+                assert!(host_for(os, arch).is_none());
+                continue;
+            }
             let host = host_for(os, arch).unwrap_or_else(|| panic!("no Rust for {game}"));
             let expected_arch = if arch == "aarch64" {
                 "aarch64-"

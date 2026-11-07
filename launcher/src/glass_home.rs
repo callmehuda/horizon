@@ -458,6 +458,16 @@ impl Launcher {
                     locked,
                     PlayItem::Prepare,
                 ));
+                items.push((
+                    "play-direct",
+                    tr("Download Minecraft directly").into(),
+                    trf(
+                        "Minecraft {version} straight from Mojang, no sign-in",
+                        &[("version", &version)],
+                    ),
+                    locked || backend::is_prepared(tag),
+                    PlayItem::DirectDownload,
+                ));
             }
             if update.is_some() {
                 items.push((
@@ -517,6 +527,9 @@ impl Launcher {
                         this.home_menu = HomeMenu::None;
                         match what {
                             PlayItem::Prepare => this.prepare(backend::MinecraftFrom::Install),
+                            PlayItem::DirectDownload => {
+                                this.prepare(backend::MinecraftFrom::Direct)
+                            }
                             PlayItem::Play => this.play(),
                             PlayItem::Shortcut => {
                                 if let Some((id, name)) = id.clone() {
@@ -951,6 +964,7 @@ fn since(ago: Duration, days: i64, date: &str) -> String {
 #[derive(Clone, Copy)]
 enum PlayItem {
     Prepare,
+    DirectDownload,
     Play,
     Shortcut,
     Command,

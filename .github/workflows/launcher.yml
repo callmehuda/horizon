@@ -22,25 +22,29 @@ name: launcher
 #   gh workflow run launcher --ref main -f dry_run=false -f force=true
 
 on:
-  push:
-    branches: [main, launcher, 'launcher-*']
-    paths:
-      # Everything the launcher is built and packaged from, as tools/release_train.py's LAUNCHER_PATHS.
-      - 'launcher/**'
-      - 'crates/horizon-bench/**'
-      - 'crates/horizon-friends/**'
-      - 'crates/horizon-mcp/**'
-      - 'crates/horizon-mods/**'
-      - 'crates/horizon-port-pack/**'
-      - 'crates/horizon-prepare/**'
-      - 'crates/horizon-release-sign/**'
-      - 'crates/horizon-telemetry/**'
-      - 'crates/horizon-theme/**'
-      - 'packaging/linux/**'
-      - 'packaging/icons/**'
-      - '.github/workflows/launcher.yml'
-  schedule:
-    - cron: '7-59/10 * * * *'
+# This fork: started by hand only. The upstream automatic trigger below needs a self-hosted
+# runner or repository variables a fork has none of (the Mac minis, the release environment);
+# this fork builds and releases with .github/workflows/build.yml instead. The original
+# trigger, kept commented for the day the runners exist:
+#   push:
+#     branches: [main, launcher, 'launcher-*']
+#     paths:
+#       # Everything the launcher is built and packaged from, as tools/release_train.py's LAUNCHER_PATHS.
+#       - 'launcher/**'
+#       - 'crates/horizon-bench/**'
+#       - 'crates/horizon-friends/**'
+#       - 'crates/horizon-mcp/**'
+#       - 'crates/horizon-mods/**'
+#       - 'crates/horizon-port-pack/**'
+#       - 'crates/horizon-prepare/**'
+#       - 'crates/horizon-release-sign/**'
+#       - 'crates/horizon-telemetry/**'
+#       - 'crates/horizon-theme/**'
+#       - 'packaging/linux/**'
+#       - 'packaging/icons/**'
+#       - '.github/workflows/launcher.yml'
+#   schedule:
+#     - cron: '7-59/10 * * * *'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -103,10 +107,10 @@ jobs:
     needs: decide
     if: needs.decide.outputs.release == 'true'
     name: build ${{ matrix.name }}
-    # Windows ARM64 is new: its failure never holds the other platforms' release (the signing job
-    # needs this job, and a failed entry of it would fail it). The release steps leave the missing
-    # ARM64 files out with a warning.
-    continue-on-error: ${{ matrix.name == 'windows-arm64' }}
+    # Windows ARM64 and 32-bit Windows are new: a failure never holds the other platforms' release
+    # (the signing job needs this job, and a failed entry of it would fail it). The release steps
+    # leave the missing files out with a warning.
+    continue-on-error: ${{ matrix.name == 'windows-arm64' || matrix.name == 'windows-x86' }}
     strategy:
       fail-fast: false
       matrix:
@@ -132,6 +136,17 @@ jobs:
             binary: horizon-launcher.exe
             pe_arch: x64
             setup_asset: horizon-launcher-setup.exe
+            # The C runtime linked in: without it the launcher asks for VCRUNTIME140.dll,
+            # which only the Visual C++ redistributable installs.
+            rustflags: -C target-feature=+crt-static
+          # 32-bit Windows, for old PCs: i686 cross-built on the x64 runner.
+          - name: windows-x86
+            os: windows-latest
+            target: i686-pc-windows-msvc
+            asset: horizon-launcher-windows-x86.zip
+            binary: horizon-launcher.exe
+            pe_arch: x86
+            setup_asset: horizon-launcher-setup-x86.exe
             # The C runtime linked in: without it the launcher asks for VCRUNTIME140.dll,
             # which only the Visual C++ redistributable installs.
             rustflags: -C target-feature=+crt-static
@@ -257,9 +272,11 @@ jobs:
           soft() { if [[ "$RUNNER_OS" == "Linux" ]]; then "$@" || echo "::warning::$* failed"; else "$@"; fi; }
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             if ! python ../tools/check_pe_arch.py "${{ matrix.pe_arch }}" "$client"; then
-              # A Nightly without an ARM64 build: the ARM64 launcher installs the x64 one (backend.rs, GAME_FALLBACK).
-              [[ "${{ matrix.pe_arch }}" == arm64 ]] && python ../tools/check_pe_arch.py x64 "$client" || exit 1
-              echo "::warning::the latest game has no ARM64 build: the launcher installed the x64 one"
+              # A release without this architecture's build: the ARM64 and 32-bit launchers install
+              # the x64 one (backend.rs, GAME_FALLBACK).
+              [[ "${{ matrix.pe_arch }}" == arm64 || "${{ matrix.pe_arch }}" == x86 ]] \
+                && python ../tools/check_pe_arch.py x64 "$client" || exit 1
+              echo "::warning::the latest game has no ${{ matrix.pe_arch }} build: the launcher installed the x64 one"
             fi
             python ../tools/check_imports.py "$client"
           elif [[ "$RUNNER_OS" == "Linux" ]]; then

@@ -731,12 +731,16 @@ enum Cmd {
     Prepare {
         /// The game folder of the official launcher, Prism Launcher, MultiMC, the Modrinth App,
         /// ATLauncher or GDLauncher (default: the launcher's, then every launcher's default)
-        #[arg(long, conflicts_with = "download")]
+        #[arg(long, conflicts_with_all = ["download", "direct"])]
         minecraft: Option<PathBuf>,
         /// Download Minecraft from Mojang for the signed-in account that owns it, instead of
         /// using an install
         #[arg(long)]
         download: bool,
+        /// Download Minecraft straight from Mojang's public endpoints, no owner asked
+        /// (horizon-android's in-app installer), instead of using an install
+        #[arg(long, conflicts_with = "download")]
+        direct: bool,
         /// The installed version (default: the selected one)
         #[arg(long)]
         version: Option<String>,
@@ -1437,12 +1441,15 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
         Cmd::Prepare {
             minecraft,
             download,
+            direct,
             version,
         } => {
             let tag = backend::resolve_version(version.as_deref())?;
             let minecraft = backend::minecraft_dir(minecraft)?;
             let from = if download {
                 backend::MinecraftFrom::Mojang
+            } else if direct {
+                backend::MinecraftFrom::Direct
             } else {
                 backend::MinecraftFrom::Install
             };

@@ -11,13 +11,17 @@ name: release
 #   gh workflow run release --ref <branch>                       # dry run: decides, starts nothing
 #   gh workflow run release -f dry_run=false -f force=true       # on main: a Nightly now, whatever the rules say
 on:
-  workflow_run:
-    # A game release ships a commit both passed on (parity-main runs on batches: the newest commit it passed on).
-    workflows: [checks, parity-main]
-    types: [completed]
-    branches: [main]
-  schedule:
-    - cron: '2-59/10 * * * *'
+# This fork: started by hand only. The upstream automatic trigger below needs a self-hosted
+# runner or repository variables a fork has none of (the Mac minis, the release environment);
+# this fork builds and releases with .github/workflows/build.yml instead. The original
+# trigger, kept commented for the day the runners exist:
+#   workflow_run:
+#     # A game release ships a commit both passed on (parity-main runs on batches: the newest commit it passed on).
+#     workflows: [checks, parity-main]
+#     types: [completed]
+#     branches: [main]
+#   schedule:
+#     - cron: '2-59/10 * * * *'
   workflow_dispatch:
     inputs:
       dry_run:

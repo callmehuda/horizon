@@ -2735,6 +2735,11 @@ mod tests {
     #[test]
     fn presets_set_vanilla_and_horizon_options() {
         let mut s = Settings::default();
+        // The fork's Legacy first (the oldest PCs), then Performance.
+        Item::Horizon(H::Preset).cycle(&mut s, false, [854, 480]);
+        assert_eq!(s.horizon.preset, Preset::Legacy);
+        assert_eq!(s.render_distance, 4);
+        assert_eq!(s.clouds, "false");
         Item::Horizon(H::Preset).cycle(&mut s, false, [854, 480]);
         assert_eq!(s.horizon.preset, Preset::Performance);
         assert_eq!(s.render_distance, 8);
@@ -2760,7 +2765,7 @@ mod tests {
         assert_eq!(seen, [2, 4, 8, 1]);
         Item::Horizon(H::ScreenshotQuality).cycle(&mut s, true, [854, 480]);
         assert_eq!(s.horizon.screenshot_quality, 8);
-        assert_eq!(s.horizon.preset, Preset::Performance);
+        assert_eq!(s.horizon.preset, Preset::Legacy);
     }
 
     #[test]

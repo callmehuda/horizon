@@ -6,7 +6,7 @@ import struct
 import sys
 from pathlib import Path
 
-MACHINES = {"x64": 0x8664, "arm64": 0xAA64}
+MACHINES = {"x86": 0x14C, "x64": 0x8664, "arm64": 0xAA64}
 
 
 def pe_machine(data):

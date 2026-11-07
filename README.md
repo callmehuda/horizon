@@ -20,6 +20,19 @@
 
 **Minecraft: Java Edition 26.3, rewritten in Rust.** Your worlds, the same rules and the same terrain as the Java game, checked against it by hundreds of differential tests, in one native program with no Java. Free, open source (MIT) and unofficial: you play it with your own copy of Java Edition.
 
+## This fork
+
+A fork tuned for old PCs and self-built releases, on top of everything Horizon itself does:
+
+- **Download Minecraft directly in the launcher, before playing.** Play's *Download directly* fetches the pinned 26.3 files straight from Mojang's public endpoints — no other launcher's install and no sign-in, exactly as [horizon-android](https://github.com/Vasysik/horizon-android)'s in-app installer does. Every file is checked against the sha1 Mojang lists, and an interrupted download resumes where it stopped. (Playing still needs your own copy of Java Edition.) The same path is in the CLI: `horizon-launcher prepare --direct`, and in the glass look's Play menu. Without a Microsoft sign-in configured, enable *Play offline without an owner* in the launcher's developer options to start the game.
+- **32-bit Windows builds**, for PCs a 64-bit build won't run on: `horizon-launcher-windows-x86.zip`/`horizon-launcher-setup-x86.exe` and the game's `horizon-windows-x86.zip` (i686, the C runtime linked in). On a 64-bit Windows, a 32-bit launcher whose release has no 32-bit game build installs the x64 one instead. On 32-bit Windows, install Java yourself for the one-time preparation (Mojang ships no 32-bit Java runtime).
+- **The Legacy graphics preset** (Video Settings → the Simple level), below Performance: render distance 4, simulation distance 4, no clouds, shadows, biome blend or mipmaps, minimal particles — for the oldest machines that can still run the game.
+- **A self-contained build-and-release pipeline**: [.github/workflows/build.yml](.github/workflows/build.yml) builds the launcher and the game for Windows x64, 32-bit Windows, Linux x86-64 and macOS on GitHub's own runners — no Mac minis, no repository environments — and publishes `vX.Y.Z` (the game) and `launcher@X.Y.Z` (the launcher) releases with SHA256SUMS signed by this fork's key ([`release-keys.txt`](crates/horizon-release-sign/release-keys.txt); Horizon's own releases stay trusted too). Launchers built by it install this fork's game builds (`backend::REPO`, `HORIZON_GAME_REPO`). Run it by hand, or push a `v*` tag:
+  ```sh
+  gh workflow run build -f release=true          # build and publish the next 0.3.x
+  gh workflow run build                          # build everything, publish nothing
+  ```
+
 <p align="center">
   <img src="docs/media/readme/valley.webp" alt="A river valley with a plains village, savanna hills and a cherry grove, seen from above with a long view distance" width="100%">
 </p>

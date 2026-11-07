@@ -83,10 +83,10 @@ jobs:
   build:
     needs: exporters
     name: build ${{ matrix.name }}
-    # Windows ARM64 and musl are new: a failure never holds the other platforms' release (the signing job
+    # Windows ARM64, musl and 32-bit Windows are new: a failure never holds the other platforms' release (the signing job
     # needs this job, and a failed entry of it would fail it). The release steps leave the missing
     # optional archives out with a warning.
-    continue-on-error: ${{ matrix.name == 'windows-arm64' || matrix.name == 'linux-musl' }}
+    continue-on-error: ${{ matrix.name == 'windows-arm64' || matrix.name == 'linux-musl' || matrix.name == 'windows-x86' }}
     strategy:
       fail-fast: false
       matrix:
@@ -109,6 +109,16 @@ jobs:
             asset: horizon-windows-x64.zip
             exe: .exe
             pe_arch: x64
+            # The C runtime linked in, so the game runs without the Visual C++ redistributable.
+            rustflags: -C target-feature=+crt-static
+          # 32-bit Windows: old PCs (the fork's addition; i686 cross-built on the x64 runner).
+          - name: windows-x86
+            os: windows-latest
+            target: i686-pc-windows-msvc
+            dir: horizon-windows-x86
+            asset: horizon-windows-x86.zip
+            exe: .exe
+            pe_arch: x86
             # The C runtime linked in, so the game runs without the Visual C++ redistributable.
             rustflags: -C target-feature=+crt-static
           - name: windows-arm64

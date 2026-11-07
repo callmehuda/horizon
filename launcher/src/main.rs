@@ -2228,6 +2228,17 @@ fn keyboard(el: Stateful<Div>, t: &Theme) -> Stateful<Div> {
     })
 }
 
+/// The "Download directly" button: Minecraft straight from Mojang's public endpoints, no
+/// owner asked (horizon-android's in-app installer), run as a preparation before the game starts.
+fn direct_button(cx: &mut Context<Launcher>, t: &Theme) -> Stateful<Div> {
+    button("prepare-direct", "Download directly", Kind::Ghost, t).on_click(cx.listener(
+        |this, _: &ClickEvent, _, cx| {
+            this.prepare(backend::MinecraftFrom::Direct);
+            cx.notify();
+        },
+    ))
+}
+
 /// A button: a block with a light bevel on top and a darker lip below, its label in the pixel
 /// face. Primary (the one main action) is the violet face; Secondary a raised block; Ghost only
 /// its label until the pointer is over it.
@@ -3420,19 +3431,27 @@ impl Launcher {
                 cx.notify();
             }));
         }
+        // The direct download horizon-android's installer made its own: Mojang's public
+        // endpoints, no owner asked. It runs before the game starts, like any preparation.
+        // A function, not a closure: the arms below ask `cx` for their own listeners.
+        let direct = |cx: &mut Context<Self>| direct_button(cx, &t);
         let prepare = match first {
-            Some(true) if no_install => div().child(
-                button(
-                    "prepare-download",
-                    "Download and prepare",
-                    Kind::Secondary,
-                    &t,
+            Some(true) if no_install => div()
+                .flex()
+                .gap(px(8.))
+                .child(
+                    button(
+                        "prepare-download",
+                        "Download and prepare",
+                        Kind::Secondary,
+                        &t,
+                    )
+                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                        this.prepare(backend::MinecraftFrom::Mojang);
+                        cx.notify();
+                    })),
                 )
-                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                    this.prepare(backend::MinecraftFrom::Mojang);
-                    cx.notify();
-                })),
-            ),
+                .child(direct(cx)),
             Some(true) => div()
                 .flex()
                 .gap(px(8.))
@@ -3455,13 +3474,21 @@ impl Launcher {
                         this.prepare(backend::MinecraftFrom::Mojang);
                         cx.notify();
                     })),
-                ),
-            Some(false) => div().child(microsoft::sign_in_button("prepare-sign-in", &t).on_click(
-                cx.listener(|this, _: &ClickEvent, _, cx| {
-                    this.sign_in_to_play();
-                    cx.notify();
-                }),
-            )),
+                )
+                .child(direct(cx)),
+            Some(false) => div()
+                .flex()
+                .gap(px(8.))
+                .child(
+                    microsoft::sign_in_button("prepare-sign-in", &t).on_click(cx.listener(
+                        |this, _: &ClickEvent, _, cx| {
+                            this.sign_in_to_play();
+                            cx.notify();
+                        },
+                    )),
+                )
+                .child(direct(cx)),
+            None if !prepared => div().flex().gap(px(8.)).child(prepare).child(direct(cx)),
             None => div().child(prepare),
         };
         let owner = self.owner == Some(true);

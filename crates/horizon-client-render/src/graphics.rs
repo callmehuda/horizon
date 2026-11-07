@@ -46,6 +46,9 @@ pub fn reported() -> Option<Reported> {
 /// Simple-level presets. `Custom` leaves every option as the player set it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Preset {
+    /// The oldest PCs: the smallest world and simulation radius, nothing decorative at all.
+    /// Below Performance, for machines the Performance preset still struggles on.
+    Legacy,
     Performance,
     Balanced,
     Quality,
@@ -54,7 +57,8 @@ pub enum Preset {
     Custom,
 }
 impl Preset {
-    pub const ALL: [Preset; 5] = [
+    pub const ALL: [Preset; 6] = [
+        Preset::Legacy,
         Preset::Performance,
         Preset::Balanced,
         Preset::Quality,
@@ -63,6 +67,7 @@ impl Preset {
     ];
     pub fn name(self) -> &'static str {
         match self {
+            Preset::Legacy => "legacy",
             Preset::Performance => "performance",
             Preset::Balanced => "balanced",
             Preset::Quality => "quality",
@@ -72,6 +77,7 @@ impl Preset {
     }
     pub fn label(self) -> &'static str {
         match self {
+            Preset::Legacy => "Legacy",
             Preset::Performance => "Performance",
             Preset::Balanced => "Balanced",
             Preset::Quality => "Quality",
@@ -1113,6 +1119,7 @@ impl Graphics {
 pub fn apply_preset(preset: Preset, s: &mut crate::settings::Settings) {
     let (rd, sim, clouds, particles, shadows, blend, mipmaps, entity, leaves, weather_r) =
         match preset {
+            Preset::Legacy => (4, 4, "false", 2, false, 0, 0, 0.5, false, 3),
             Preset::Performance => (8, 6, "false", 2, false, 0, 0, 0.5, false, 3),
             Preset::Balanced => (12, 8, "fast", 1, true, 1, 2, 0.75, true, 5),
             Preset::Quality => (16, 12, "true", 0, true, 2, 4, 1.0, true, 10),

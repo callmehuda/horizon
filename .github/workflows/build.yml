@@ -1,0 +1,556 @@
+name: build
+# This fork's own pipeline: builds the launcher and the game for every platform a GitHub-hosted
+# runner can reach — including 32-bit Windows (i686), for old PCs — and publishes releases.
+#
+# Upstream's release train (launcher.yml, release.yml, nightly-build.yml) needs runners a fork
+# does not have (the Mac minis) and repository environments; this workflow stands alone:
+#
+#   exporters  The pinned Minecraft 26.3's files, downloaded from Mojang's public endpoints by
+#              tools/ci/fork-vanilla.py (checked against research-lock.json, as the launcher's
+#              own download checks them), then a full horizon-prepare and the exporters' bundle
+#              the game folders ship.
+#   game       horizon-client, horizon-ctl, horizon-prepare and horizon-server on Windows x64,
+#              32-bit Windows (i686-pc-windows-msvc), Linux x86-64 (+ the server folder) and
+#              macOS (Apple Silicon, and Intel cross-built), packaged by xtask.
+#   launcher   horizon-launcher on the same five platforms, built with HORIZON_GAME_REPO so it
+#              installs this fork's game builds and updates itself from this fork's releases.
+#   sign       SHA256SUMS signed with the RELEASE_SIGNING_KEY secret (an Ed25519 key whose
+#              public half is in crates/horizon-release-sign/release-keys.txt); without the
+#              secret a throwaway key signs, and the releases are marked pre-release.
+#   release    Two releases, in the tags' formats the launcher parses: vX.Y.Z with the game
+#              archives and launcher@X.Y.Z with the launchers, each with its signed SHA256SUMS.
+#
+#   gh workflow run build -f release=true                 # build and publish v0.3.N
+#   gh workflow run build -f release=true -f version=0.3.7
+#   gh workflow run build                                  # build everything, publish nothing
+#   git tag v0.3.7 && git push origin v0.3.7              # a tag publishes that version
+#
+# Windows x86's and the macOS builds may fail without holding the release (continue-on-error):
+# the release steps publish what built and warn about the rest, as upstream does for ARM64.
+on:
+  push:
+    branches: [main, master, 'build-*']
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Publish releases (vX.Y.Z and launcher@X.Y.Z) after the build
+        type: boolean
+        default: false
+      version:
+        description: 'The version to release (default: the tag pushed, or the next 0.3.x)'
+        type: string
+        default: ''
+      full:
+        description: Build the game too (always true for releases)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  HORIZON_TELEMETRY_URL: "off"
+
+jobs:
+  decide:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      release: ${{ steps.decide.outputs.release }}
+      full: ${{ steps.decide.outputs.full }}
+      version: ${{ steps.decide.outputs.version }}
+      game_tag: ${{ steps.decide.outputs.game_tag }}
+      launcher_tag: ${{ steps.decide.outputs.launcher_tag }}
+      head: ${{ steps.decide.outputs.head }}
+      signed: ${{ steps.decide.outputs.signed }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ github.ref }}
+          EVENT: ${{ github.event_name }}
+          WANT_RELEASE: ${{ inputs.release && 'yes' || '' }}
+          WANT_VERSION: ${{ inputs.version }}
+          WANT_FULL: ${{ inputs.full && 'yes' || '' }}
+          # The fork's signing key: releases without it are signed with a throwaway key, so
+          # launchers refuse them as updates (and the release is marked pre-release).
+          HAS_KEY: ${{ secrets.RELEASE_SIGNING_KEY != '' && 'yes' || '' }}
+        run: |
+          set -euo pipefail
+          head=$(git rev-parse HEAD)
+          release=no; full=no; version=''
+          if [[ "$REF" == refs/tags/v* ]]; then
+            release=yes; version="${REF#refs/tags/v}"
+          elif [[ "$EVENT" == workflow_dispatch ]]; then
+            version="$WANT_VERSION"
+            [[ "$WANT_RELEASE" == yes ]] && release=yes || true
+            [[ "$WANT_FULL" == yes ]] && full=yes || true
+          fi
+          if [[ -z "$version" ]]; then
+            # The next of this fork's 0.3.x line (upstream's latest 0.2.x stays below it); the
+            # first release a fork makes is 0.3.0.
+            next=-1
+            for tag in $(git tag -l 'v0.3.*'); do
+              n=${tag#v0.3.}
+              [[ "$n" =~ ^[0-9]+$ ]] && (( n > next )) && next=$n || true
+            done
+            version="0.3.$((next + 1))"
+          fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::version $version is not X.Y.Z"; exit 1; }
+          [[ "$release" == yes ]] && full=yes || true
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "game_tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "launcher_tag=launcher@$version" >> "$GITHUB_OUTPUT"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+          echo "signed=$HAS_KEY" >> "$GITHUB_OUTPUT"
+          echo "### build $version" >> "$GITHUB_STEP_SUMMARY"
+          echo "release=$release full=$full game=v$version launcher=launcher@$version signed=$HAS_KEY" >> "$GITHUB_STEP_SUMMARY"
+
+  exporters:
+    needs: decide
+    if: needs.decide.outputs.full == 'yes'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.decide.outputs.head }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: fork-exporters
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: The pinned Minecraft, downloaded from Mojang and checked
+        run: python3 tools/ci/fork-vanilla.py --out "$RUNNER_TEMP/minecraft"
+      - name: Build the preparer
+        run: cargo build --release --locked -p horizon-prepare
+      - name: A full preparation (the import the exporters compile from)
+        run: |
+          version=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' research-lock.json | head -1)
+          target/release/horizon-prepare --prepare --root . \
+            --version-json "$RUNNER_TEMP/minecraft/versions/$version/$version.json" \
+            --client-jar "$RUNNER_TEMP/minecraft/versions/$version/$version.jar" \
+            --libraries-dir "$RUNNER_TEMP/minecraft/libraries" \
+            --assets-dir "$RUNNER_TEMP/minecraft/assets" \
+            --server-jar "$RUNNER_TEMP/minecraft/server-$version.jar"
+      - name: Compile and validate the exporters
+        run: |
+          set -euo pipefail
+          bundle=$(target/release/horizon-prepare compile-exporters --root . | tail -1)
+          mkdir -p exporters
+          cp -R "$bundle/server" "$bundle/client" "$bundle/manifest.json" exporters/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: original-exporters
+          path: exporters/
+          if-no-files-found: error
+          retention-days: 3
+
+  game:
+    needs: [decide, exporters]
+    name: game ${{ matrix.name }}
+    continue-on-error: ${{ matrix.name != 'linux' && matrix.name != 'windows' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-22.04
+            dir: horizon-linux-x86_64
+            asset: horizon-linux-x86_64.tar.gz
+            server_dir: horizon-server-linux-x86_64
+            server_asset: horizon-server-linux-x86_64.tar.gz
+          - name: windows
+            os: windows-latest
+            dir: horizon-windows-x64
+            asset: horizon-windows-x64.zip
+            exe: .exe
+            pe_arch: x64
+            # The C runtime linked in, so the game runs without the Visual C++ redistributable.
+            rustflags: -C target-feature=+crt-static
+          - name: windows-x86
+            os: windows-latest
+            target: i686-pc-windows-msvc
+            dir: horizon-windows-x86
+            asset: horizon-windows-x86.zip
+            exe: .exe
+            pe_arch: x86
+            # The C runtime linked in, so the game runs without the Visual C++ redistributable.
+            rustflags: -C target-feature=+crt-static
+          - name: macos
+            os: macos-latest
+            dir: horizon-macos-arm64
+            asset: horizon-macos-arm64.zip
+          - name: macos-x64
+            os: macos-latest
+            target: x86_64-apple-darwin
+            dir: horizon-macos-x64
+            asset: horizon-macos-x64.zip
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
+      HORIZON_VERSION: ${{ needs.decide.outputs.version }}
+      BIN: ${{ matrix.target && format('target/{0}/release', matrix.target) || 'target/release' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.decide.outputs.head }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: fork-game-${{ matrix.name }}
+      - name: ALSA and udev headers
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+      - name: Build the client, horizon-ctl, horizon-prepare and horizon-server
+        run: cargo build --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }} -p horizon-client -p horizon-client-lib --bin horizon-client --bin horizon-ctl -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server
+      - name: Every program the release folder takes was built
+        run: |
+          for binary in horizon-client horizon-ctl horizon-prepare horizon-server; do
+            test -f "$BIN/$binary${{ matrix.exe }}" || { echo "::error::$BIN/$binary${{ matrix.exe }} is missing"; exit 1; }
+          done
+      - name: Verify Windows executable architecture
+        if: runner.os == 'Windows'
+        run: python tools/check_pe_arch.py "${{ matrix.pe_arch }}" "$BIN/horizon-client${{ matrix.exe }}" "$BIN/horizon-ctl${{ matrix.exe }}" "$BIN/horizon-prepare${{ matrix.exe }}" "$BIN/horizon-server${{ matrix.exe }}"
+      - name: Every program starts
+        run: |
+          set -euo pipefail
+          "$BIN/horizon-client${{ matrix.exe }}" --help | grep -q -- '--resources'
+          "$BIN/horizon-ctl${{ matrix.exe }}" --help > /dev/null
+          out=$("$BIN/horizon-prepare${{ matrix.exe }}" --version | tr -d '\r')
+          [[ "$out" == "horizon-prepare $HORIZON_VERSION" ]] || { echo "::error::expected horizon-prepare $HORIZON_VERSION"; exit 1; }
+      - name: Baseline CPUs only
+        # No POPCNT or LZCNT: a C library's count intrinsic killed the game before main on a Core 2.
+        if: runner.os != 'macOS' && matrix.pe_arch != 'arm64'
+        run: |
+          set -euo pipefail
+          rustup component add llvm-tools
+          python tools/check_cpu_baseline.py \
+            $(for binary in horizon-client horizon-ctl horizon-prepare horizon-server; do echo "$BIN/$binary${{ matrix.exe }}"; done)
+      - uses: actions/download-artifact@v8
+        with:
+          name: original-exporters
+          path: exporters
+      - name: Package
+        run: |
+          set -euo pipefail
+          cargo run --locked -p xtask -- package "$BIN/horizon-client${{ matrix.exe }}" "dist/${{ matrix.dir }}"
+          cd dist
+          rm -f "${{ matrix.asset }}"
+          case "${{ matrix.asset }}" in
+            *.tar.gz) tar czf "${{ matrix.asset }}" "${{ matrix.dir }}" ;;
+            *) if [[ "$RUNNER_OS" == Windows ]]; then 7z a -tzip "${{ matrix.asset }}" "${{ matrix.dir }}" > /dev/null
+               else
+                 ditto -c -k --norsrc --noextattr --noqtn --keepParent "${{ matrix.dir }}" "${{ matrix.asset }}"
+                 if unzip -Z1 "${{ matrix.asset }}" | grep -E '(^|/)(\._|__MACOSX/)'; then
+                   echo "::error::macOS metadata files in ${{ matrix.asset }}"; exit 1
+                 fi
+               fi ;;
+          esac
+          ls -l "${{ matrix.asset }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+          retention-days: 3
+      - name: The server build (the game without sound or controllers, as horizon-engine)
+        if: matrix.server_asset
+        run: |
+          set -euo pipefail
+          cargo build --release --locked -p horizon-client --no-default-features --bin horizon-client
+          cargo run --locked -p xtask -- package-server target/release/horizon-client "dist/${{ matrix.server_dir }}"
+          folder="dist/${{ matrix.server_dir }}"
+          python3 tools/check_imports.py --server "$folder/horizon-engine" "$folder/horizon-server" "$folder/horizon-prepare"
+          "$folder/horizon-engine" --help | grep -q -- '--resources'
+          [[ "$("$folder/horizon-server" --version)" == "horizon-server $HORIZON_VERSION" ]]
+          cd dist
+          rm -f "${{ matrix.server_asset }}"
+          tar czf "${{ matrix.server_asset }}" "${{ matrix.server_dir }}"
+          ls -l "${{ matrix.server_asset }}"
+      - uses: actions/upload-artifact@v7
+        if: matrix.server_asset
+        with:
+          name: ${{ matrix.server_asset }}
+          path: dist/${{ matrix.server_asset }}
+          if-no-files-found: error
+          retention-days: 3
+
+  launcher:
+    needs: decide
+    name: launcher ${{ matrix.name }}
+    continue-on-error: ${{ matrix.name != 'linux' && matrix.name != 'windows' && matrix.name != 'windows-x86' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-22.04
+            asset: horizon-launcher-linux-x86_64.tar.gz
+            binary: horizon-launcher
+          - name: windows
+            os: windows-latest
+            asset: horizon-launcher-windows-x64.zip
+            binary: horizon-launcher.exe
+            pe_arch: x64
+            setup_asset: horizon-launcher-setup.exe
+            # The C runtime linked in: without it the launcher asks for VCRUNTIME140.dll.
+            rustflags: -C target-feature=+crt-static
+          - name: windows-x86
+            os: windows-latest
+            target: i686-pc-windows-msvc
+            asset: horizon-launcher-windows-x86.zip
+            binary: horizon-launcher.exe
+            pe_arch: x86
+            setup_asset: horizon-launcher-setup-x86.exe
+            # The C runtime linked in: without it the launcher asks for VCRUNTIME140.dll.
+            rustflags: -C target-feature=+crt-static
+          - name: macos
+            os: macos-latest
+            asset: horizon-launcher-macos-arm64.zip
+            binary: horizon-launcher
+          - name: macos-x64
+            os: macos-latest
+            target: x86_64-apple-darwin
+            asset: horizon-launcher-macos-x64.zip
+            binary: horizon-launcher
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
+      BIN: ${{ matrix.target && format('target/{0}/release', matrix.target) || 'target/release' }}
+      # This fork's launcher installs this fork's game builds and updates itself from this
+      # fork's releases (backend::REPO); every other build keeps Horizon's own repository.
+      HORIZON_GAME_REPO: ${{ github.repository }}
+      HORIZON_LAUNCHER_VERSION: ${{ needs.decide.outputs.version }}
+      HORIZON_LAUNCHER_TAG: ${{ needs.decide.outputs.launcher_tag }}
+    defaults:
+      run:
+        working-directory: launcher
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.decide.outputs.head }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: launcher
+          shared-key: fork-launcher-${{ matrix.name }}
+      - name: Linux libraries GPUI links to
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libvulkan-dev libasound2-dev patchelf
+      - name: The launcher's tests
+        if: matrix.name == 'linux'
+        run: cargo test --release --locked
+      - name: Build the launcher
+        run: cargo build --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+      - name: Verify Windows executable architecture
+        if: runner.os == 'Windows'
+        run: python ../tools/check_pe_arch.py "${{ matrix.pe_arch }}" "$BIN/${{ matrix.binary }}"
+      - name: The launcher starts
+        env:
+          HORIZON_LAUNCHER_NO_SELF_UPDATE: '1'
+          HORIZON_GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          out=$("$BIN/${{ matrix.binary }}" --version | tr -d '\r')
+          echo "$out"
+          [[ "$out" == "horizon-launcher $HORIZON_LAUNCHER_VERSION" ]] || { echo "::error::expected horizon-launcher $HORIZON_LAUNCHER_VERSION"; exit 1; }
+          "$BIN/${{ matrix.binary }}" --help > /dev/null
+      - name: Package
+        run: |
+          rm -rf dist out && mkdir -p out dist
+          cp "$BIN/${{ matrix.binary }}" dist/
+          if [[ "${{ matrix.asset }}" == *.tar.gz ]]; then
+            (cd dist && tar czf ../out/${{ matrix.asset }} ${{ matrix.binary }})
+          else
+            (cd dist && 7z a ../out/${{ matrix.asset }} ${{ matrix.binary }})
+          fi
+          if [[ -n "${{ matrix.setup_asset }}" ]]; then
+            # The launcher's binary under the setup's name: started with no arguments it shows
+            # the per-user installer instead of Home (launcher/src/installer.rs).
+            cp "$BIN/${{ matrix.binary }}" "out/${{ matrix.setup_asset }}"
+          fi
+          ls -l out
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.asset }}
+          path: launcher/out/*
+          retention-days: 3
+  sign:
+    needs: [decide, game, launcher]
+    if: always() && needs.decide.outputs.release == 'yes' && needs.game.result != 'failure' && needs.launcher.result != 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: tools/ci/sign_release.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          pattern: horizon-*
+          merge-multiple: true
+      - name: The game's files and the launcher's, apart
+        run: |
+          set -euo pipefail
+          mkdir -p game launcher
+          # horizon-launcher-* is the launcher release's; everything else the game release's.
+          mv dist/horizon-launcher-* launcher/
+          mv dist/* game/
+          echo "### The game's files (${{ needs.decide.outputs.game_tag }})" >> "$GITHUB_STEP_SUMMARY"
+          ls -l game >> "$GITHUB_STEP_SUMMARY"
+          echo "### The launcher's (${{ needs.decide.outputs.launcher_tag }})" >> "$GITHUB_STEP_SUMMARY"
+          ls -l launcher >> "$GITHUB_STEP_SUMMARY"
+      - name: Sign the checksums (SHA256SUMS, SHA256SUMS.sig)
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          RELEASE_SIGNING_KEY_NEXT: ${{ secrets.RELEASE_SIGNING_KEY_NEXT }}
+          EPHEMERAL: ${{ needs.decide.outputs.signed != 'yes' && 'yes' || '' }}
+          GAME_TAG: ${{ needs.decide.outputs.game_tag }}
+          LAUNCHER_TAG: ${{ needs.decide.outputs.launcher_tag }}
+        run: |
+          set -euo pipefail
+          bash tools/ci/sign_release.sh "$GAME_TAG" game/*
+          bash tools/ci/sign_release.sh "$LAUNCHER_TAG" launcher/*
+          if [[ -n "$EPHEMERAL" ]]; then
+            echo "::warning::No RELEASE_SIGNING_KEY secret: signed with a throwaway key, so launchers           will refuse these releases as updates. Add the secret (docs/security.md) and run again."
+          fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: signature-game
+          path: game/SHA256SUMS*
+          if-no-files-found: error
+          retention-days: 3
+      - uses: actions/upload-artifact@v7
+        with:
+          name: signature-launcher
+          path: launcher/SHA256SUMS*
+          if-no-files-found: error
+          retention-days: 3
+      - uses: actions/upload-artifact@v7
+        if: needs.decide.outputs.signed != 'yes'
+        with:
+          name: ephemeral-pub-game
+          path: game/ephemeral.pub
+          retention-days: 3
+
+  release:
+    needs: [decide, sign]
+    if: needs.decide.outputs.release == 'yes'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.decide.outputs.head }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          pattern: horizon-*
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          path: game-sig
+          name: signature-game
+      - uses: actions/download-artifact@v8
+        with:
+          path: launcher-sig
+          name: signature-launcher
+      - uses: actions/download-artifact@v8
+        if: needs.decide.outputs.signed != 'yes'
+        with:
+          path: game-sig
+          name: ephemeral-pub-game
+      - name: The two releases' folders
+        run: |
+          set -euo pipefail
+          mkdir -p release-game release-launcher
+          mv dist/horizon-launcher-* release-launcher/
+          mv dist/* release-game/
+          cp game-sig/SHA256SUMS* release-game/
+          cp launcher-sig/SHA256SUMS* release-launcher/
+          for file in horizon-windows-arm64.zip horizon-windows-x86.zip horizon-macos-arm64.zip horizon-macos-x64.zip; do
+            [[ -f "release-game/$file" ]] || echo "::warning::$file did not build: this release goes out without it"
+          done
+          for file in horizon-launcher-windows-arm64.zip horizon-launcher-windows-x86.zip horizon-launcher-macos-arm64.zip horizon-launcher-macos-x64.zip; do
+            [[ -f "release-launcher/$file" ]] || echo "::warning::$file did not build: this release goes out without it"
+          done
+      - name: The signatures, checked as launchers check them
+        env:
+          GAME_TAG: ${{ needs.decide.outputs.game_tag }}
+          LAUNCHER_TAG: ${{ needs.decide.outputs.launcher_tag }}
+          EPHEMERAL: ${{ needs.decide.outputs.signed != 'yes' && 'yes' || '' }}
+        run: |
+          set -euo pipefail
+          key=(); [[ -n "$EPHEMERAL" ]] && key=(--key "$(cat game-sig/ephemeral.pub)")
+          cargo run --locked --quiet -p horizon-release-sign -- verify --tag "$GAME_TAG" --publishing "${key[@]}" release-game
+          cargo run --locked --quiet -p horizon-release-sign -- verify --tag "$LAUNCHER_TAG" --publishing "${key[@]}" release-launcher
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GAME_TAG: ${{ needs.decide.outputs.game_tag }}
+          LAUNCHER_TAG: ${{ needs.decide.outputs.launcher_tag }}
+          VERSION: ${{ needs.decide.outputs.version }}
+          SIGNED: ${{ needs.decide.outputs.signed }}
+          HEAD: ${{ needs.decide.outputs.head }}
+        run: |
+          set -euo pipefail
+          prerelease=(); [[ "$SIGNED" != yes ]] && prerelease=(--prerelease) || true
+          notes() {
+            cat <<NOTES
+          Horizon $1 (fork build $VERSION)
+
+          Built by this fork's own workflow from commit ${HEAD:0:7}: the launcher and the game
+          for Windows x64, 32-bit Windows, Linux x86-64 and macOS.
+
+          - **Download Minecraft directly in the launcher**: Play's "Download directly" needs no
+            other launcher and no sign-in, as horizon-android's in-app installer does.
+          - **32-bit Windows builds** (the `-x86` files) for old PCs, with the C runtime linked in.
+          - **The Legacy graphics preset** (Video Settings, the Simple level): render distance 4,
+            nothing decorative, for the oldest machines.
+          - On 64-bit Windows a 32-bit launcher whose release has no 32-bit game build installs
+            the x64 one; on 32-bit Windows a locally installed Java prepares the game once.
+          NOTES
+          }
+          notes "$VERSION" > game-notes.md
+          notes "$VERSION" > launcher-notes.md
+          # The game: vX.Y.Z, and GitHub's latest. The launcher: launcher@X.Y.Z, never latest,
+          # in the tag formats the launcher itself parses (docs/versioning.md).
+          gh release create "$GAME_TAG" --target "$HEAD" --latest             --title "Horizon $VERSION (fork build)" --notes-file game-notes.md \
+            "${prerelease[@]}" release-game/*
+          echo "published $GAME_TAG"
+          gh release create "$LAUNCHER_TAG" --target "$HEAD" --latest=false \
+            --title "Horizon launcher $VERSION (fork build)" --notes-file launcher-notes.md \
+            "${prerelease[@]}" release-launcher/*
+          echo "published $LAUNCHER_TAG"

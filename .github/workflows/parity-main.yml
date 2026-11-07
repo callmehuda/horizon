@@ -5,8 +5,12 @@ name: parity-main
 # bisects the failing harnesses over those merges and comments on the pull request that broke them. Releases ship
 # only a commit whose parity-main passed (tools/release_train.py), so nothing a harness catches reaches players.
 on:
-  push:
-    branches: [main]
+# This fork: started by hand only. The upstream automatic trigger below needs a self-hosted
+# runner or repository variables a fork has none of (the Mac minis, the release environment);
+# this fork builds and releases with .github/workflows/build.yml instead. The original
+# trigger, kept commented for the day the runners exist:
+#   push:
+#     branches: [main]
   workflow_dispatch:
 permissions:
   contents: read

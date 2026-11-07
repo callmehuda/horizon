@@ -33,8 +33,12 @@ run-name: nightly build${{ inputs.request && format(' (request {0})', inputs.req
 #   gh workflow run "nightly build" -f force=true       # build and publish even if unchanged
 #   gh workflow run "nightly build" -f dry_run=true     # build and sign with a throwaway key, publish nothing
 on:
-  schedule:
-    - cron: '17 20 * * *'  # 20:17 UTC: after the day's waves, before the 03:07 Paris parity audit takes the Mac mini
+# This fork: started by hand only. The upstream automatic trigger below needs a self-hosted
+# runner or repository variables a fork has none of (the Mac minis, the release environment);
+# this fork builds and releases with .github/workflows/build.yml instead. The original
+# trigger, kept commented for the day the runners exist:
+#   schedule:
+#     - cron: '17 20 * * *'  # 20:17 UTC: after the day's waves, before the 03:07 Paris parity audit takes the Mac mini
   workflow_dispatch:
     inputs:
       force:
@@ -175,13 +179,16 @@ jobs:
           EPHEMERAL: ${{ needs.pick.outputs.dry_run == 'true' && 'yes' || '' }}
           ALSO_FOR: nightly-${{ needs.pick.outputs.date }}-${{ needs.pick.outputs.short }}
         run: |
-          # Windows ARM64's build may fail without holding the Nightly (game-build.yml): then it is left out.
+          # Windows ARM64's, musl's and 32-bit Windows's builds may fail without holding the Nightly (game-build.yml):
+          # then they are left out.
           arm64=(); if [[ -f dist/horizon-windows-arm64.zip ]]; then arm64=(dist/horizon-windows-arm64.zip)
           else echo "::warning::horizon-windows-arm64.zip is missing: SHA256SUMS goes out without it"; fi
+          x86=(); if [[ -f dist/horizon-windows-x86.zip ]]; then x86=(dist/horizon-windows-x86.zip)
+          else echo "::warning::horizon-windows-x86.zip is missing: SHA256SUMS goes out without it"; fi
           musl=(); if [[ -f dist/horizon-linux-musl-x86_64.tar.gz ]]; then musl=(dist/horizon-linux-musl-x86_64.tar.gz)
           else echo "::warning::horizon-linux-musl-x86_64.tar.gz is missing: SHA256SUMS goes out without it"; fi
           bash tools/ci/sign_release.sh nightly dist/horizon-linux-x86_64.tar.gz dist/horizon-windows-x64.zip \
-            "${arm64[@]}" "${musl[@]}" \
+            "${arm64[@]}" "${x86[@]}" "${musl[@]}" \
             dist/horizon-macos-arm64.zip dist/horizon-macos-x64.zip dist/horizon-server-linux-x86_64.tar.gz \
             dist/horizon-source.tar.gz
       - uses: actions/upload-artifact@v7
@@ -249,12 +256,18 @@ jobs:
           [[ -f dist/SHA256SUMS.v2.sig ]] && signature+=(dist/SHA256SUMS.v2.sig)
           # The title is what launchers parse (strictly) into the version SHA256SUMS.v2.sig is signed for.
           [[ "${SHA:0:7}" == "$SHORT" ]] || { echo "::error::the build's commit isn't the one signed"; exit 1; }
-          # The ARM64 archive only when its build succeeded (the sign job left it out of SHA256SUMS otherwise).
+          # The ARM64 and 32-bit archives only when their builds succeeded (the sign job left them out of SHA256SUMS otherwise).
           arm64=()
           if [[ -f dist/horizon-windows-arm64.zip ]]; then
             arm64=("dist/horizon-windows-arm64.zip#Game files the launcher installs (Nightly): Windows ARM64 (horizon-windows-arm64.zip)")
           else
             echo "::warning::horizon-windows-arm64.zip is missing: the Nightly goes out without it (ARM64 launchers install the x64 build)"
+          fi
+          x86=()
+          if [[ -f dist/horizon-windows-x86.zip ]]; then
+            x86=("dist/horizon-windows-x86.zip#Game files the launcher installs (Nightly): 32-bit Windows (horizon-windows-x86.zip)")
+          else
+            echo "::warning::horizon-windows-x86.zip is missing: the Nightly goes out without it (32-bit launchers install the x64 build where Windows is 64-bit)"
           fi
           musl=()
           if [[ -f dist/horizon-linux-musl-x86_64.tar.gz ]]; then
@@ -270,6 +283,7 @@ jobs:
             "${musl[@]}" \
             "dist/horizon-windows-x64.zip#Game files the launcher installs (Nightly): Windows (horizon-windows-x64.zip)" \
             "${arm64[@]}" \
+            "${x86[@]}" \
             "dist/horizon-macos-arm64.zip#Game files the launcher installs (Nightly): macOS on Apple Silicon (horizon-macos-arm64.zip)" \
             "dist/horizon-macos-x64.zip#Game files the launcher installs (Nightly): macOS on Intel (horizon-macos-x64.zip)" \
             "dist/horizon-server-linux-x86_64.tar.gz#Nightly dedicated server for Linux (horizon-server-linux-x86_64.tar.gz)" \
