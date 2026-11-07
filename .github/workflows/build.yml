@@ -207,6 +207,10 @@ jobs:
       RUSTFLAGS: ${{ matrix.rustflags }}
       HORIZON_VERSION: ${{ needs.decide.outputs.version }}
       BIN: ${{ matrix.target && format('target/{0}/release', matrix.target) || 'target/release' }}
+    defaults:
+      run:
+        # The steps' for-loops and case statements are bash; Windows would run PowerShell.
+        shell: bash
     steps:
       - uses: actions/checkout@v7
         with:
@@ -541,7 +545,7 @@ jobs:
 
           - **Download Minecraft directly in the launcher**: Play's "Download directly" needs no
             other launcher and no sign-in, as horizon-android's in-app installer does.
-          - **32-bit Windows builds** (the `-x86` files) for old PCs, with the C runtime linked in.
+          - **32-bit Windows builds** (the "-x86" files) for old PCs, with the C runtime linked in.
           - **The Legacy graphics preset** (Video Settings, the Simple level): render distance 4,
             nothing decorative, for the oldest machines.
           - On 64-bit Windows a 32-bit launcher whose release has no 32-bit game build installs
@@ -552,7 +556,8 @@ jobs:
           notes "$VERSION" > launcher-notes.md
           # The game: vX.Y.Z, and GitHub's latest. The launcher: launcher@X.Y.Z, never latest,
           # in the tag formats the launcher itself parses (docs/versioning.md).
-          gh release create "$GAME_TAG" --target "$HEAD" --latest             --title "Horizon $VERSION (fork build)" --notes-file game-notes.md \
+          gh release create "$GAME_TAG" --target "$HEAD" --latest \
+            --title "Horizon $VERSION (fork build)" --notes-file game-notes.md \
             "${prerelease[@]}" release-game/*
           echo "published $GAME_TAG"
           gh release create "$LAUNCHER_TAG" --target "$HEAD" --latest=false \
